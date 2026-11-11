@@ -37,6 +37,7 @@ if [ -d "$FOLDER" ]; then
       case "$id" in "$p".*) rm -rfx "$app"; break ;; esac
     done
   done < <(find "$FOLDER" -mindepth 1 -maxdepth 1 -type d -name '*.app')
+  rm -f "$FOLDER/.DS_Store"   # Finder's view settings would keep the folder from being empty
   rmdir "$FOLDER" 2>/dev/null
 fi
 [ -L "$HOME/Desktop/$FOLDER_NAME" ] && [ "$(readlink "$HOME/Desktop/$FOLDER_NAME")" = "$FOLDER" ] && rm -f "$HOME/Desktop/$FOLDER_NAME"

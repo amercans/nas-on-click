@@ -70,6 +70,7 @@ L_FINAL_TITLE="WARNING: FILES AND FOLDERS YOU DELETE IN NAS FOLDERS ARE DELETED 
 L_FINAL_DONE="Setup is complete."
 L_FINAL_HOWTO="Double-click a folder icon to open it; the folder opens in Finder within a few seconds."
 L_FINAL_WHERE="Files in an opened folder live on the NAS, not on your Mac; every change and every deletion applies to the NAS directly."
+L_FINAL_SIDEBAR="Tip: drag the \"$FOLDER_NAME\" folder into Favorites in the Finder sidebar to keep your NAS folders one click away."
 L_FINAL_WARP="Outside the office, make sure the WARP app in the menu bar is connected."
 
 # Background task

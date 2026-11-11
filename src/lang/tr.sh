@@ -70,6 +70,7 @@ L_FINAL_TITLE="DİKKAT: NAS KLASÖRLERİNDE SİLDİĞİNİZ DOSYA VE KLASÖRLER 
 L_FINAL_DONE="Kurulum tamamlandı."
 L_FINAL_HOWTO="Bir klasörü açmak için simgesine çift tıklayın; klasör birkaç saniye içinde Finder'da açılır."
 L_FINAL_WHERE="Açılan klasördeki dosyalar bilgisayarınızda değil, NAS'ta durur; yapılan her değişiklik ve silme işlemi doğrudan NAS'a uygulanır."
+L_FINAL_SIDEBAR="İsterseniz \"$FOLDER_NAME\" klasörünü Finder'ın kenar çubuğundaki Favoriler bölümüne sürükleyin; klasörlerinize her zaman tek tıkla ulaşırsınız."
 L_FINAL_WARP="Ofis dışındayken menü çubuğundaki WARP uygulamasının bağlı olduğundan emin olun."
 
 # Background task

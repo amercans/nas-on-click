@@ -423,7 +423,9 @@ body="$body$L_FINAL_DONE
 
 $where $L_FINAL_HOWTO
 
-$L_FINAL_WHERE"
+$L_FINAL_WHERE
+
+$L_FINAL_SIDEBAR"
 noc_has_remote && body="$body
 
 $L_FINAL_WARP"

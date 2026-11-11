@@ -6,6 +6,15 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-11
+
+### Added
+- The final setup message suggests dragging the NAS folder into Finder's Favorites.
+
+### Fixed
+- Uninstall now removes the NAS folder even when Finder has left its hidden view
+  settings file in it.
+
 ## [1.0.0] - 2026-11-11
 
 ### Added
