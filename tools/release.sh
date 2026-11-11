@@ -80,6 +80,12 @@ swift "$ROOT/tools/signer.swift" sign "$OUT/manifest.json" > "$OUT/manifest.sig"
 dist/payload/bin/nas-on-click verify-manifest "$OUT/manifest.json" "$OUT/manifest.sig" keys/update-keys.txt nas-on-click 0.0.0 >/dev/null \
   || die "the manifest does not verify against keys/update-keys.txt"
 
-gh release upload "v$VER" --repo "$REPO" "$OUT/manifest.json" "$OUT/manifest.sig"
+# The release is still a draft, so re-uploading is allowed; then check what GitHub holds
+# is byte-for-byte what was signed before publishing (after which it is immutable).
+gh release upload "v$VER" --repo "$REPO" --clobber "$OUT/manifest.json" "$OUT/manifest.sig" || true
+CHECK="$OUT/check"; rm -rf "$CHECK"; mkdir -p "$CHECK"
+gh release download "v$VER" --repo "$REPO" --pattern "manifest.*" --dir "$CHECK"
+cmp -s "$CHECK/manifest.json" "$OUT/manifest.json" && cmp -s "$CHECK/manifest.sig" "$OUT/manifest.sig" \
+  || die "the uploaded manifest does not match the signed one"
 gh release edit "v$VER" --repo "$REPO" --draft=false
 echo "Released $VER"
