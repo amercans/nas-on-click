@@ -1,0 +1,22 @@
+# Lists the SMB shares of HOST as USER. The password is read from stdin and typed
+# into smbutil's prompt through a pseudo-terminal, so it never appears in any
+# process's arguments or environment. Sent at most once.
+# Exit code: smbutil's (77 = authentication failed), 124 = timeout, 64 = usage.
+if {[llength $argv] != 2} { exit 64 }
+lassign $argv host user
+if {[gets stdin password] < 0} { exit 64 }
+set timeout 30
+set sent 0
+spawn -noecho /usr/bin/smbutil view "//$user@$host"
+expect {
+  -re {Password for [^\r\n]*:} {
+    if {$sent} { exit 77 }
+    set sent 1
+    send -- "$password\r"
+    exp_continue
+  }
+  timeout { exit 124 }
+  eof
+}
+lassign [wait] pid spawnid oserr code
+exit $code

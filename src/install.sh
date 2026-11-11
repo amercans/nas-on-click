@@ -20,7 +20,9 @@ fi
 
 . "$HERE/lib/config.sh"
 if ! noc_load_config "$CFG"; then
-  [ $MODE = install ] && osascript -e 'display dialog "This setup package contains an invalid config file." buttons {"OK"} default button 1 with icon stop' >/dev/null 2>&1
+  if [ $MODE = install ] && [ -x "${NOC_UI:-}" ]; then
+    "$NOC_UI" ui --title "Setup" --message "This setup package contains an invalid config file." --style stop --button OK >/dev/null 2>&1
+  fi
   exit 1
 fi
 noc_load_lang "$HERE" || exit 1
@@ -47,7 +49,8 @@ rollback() {
 finish() {
   local rc=$? msg
   stop_enroll
-  rm -rf "$STAGE" "$D/install.lock"
+  noc_status_done
+  rm -rf "$STAGE"
   [ $rc -ne 0 ] && [ $MODE = update ] && rollback
   if [ $rc = 1 ] && [ $MODE = install ]; then
     msg="$(cat "$D/install-error" 2>/dev/null)"
@@ -61,7 +64,7 @@ $L_FAILED_TAIL" stop
 }
 
 # --- Welcome -----------------------------------------------------------------------
-if [ $MODE = install ]; then
+if [ $MODE = install ] && [ -z "${NOC_SKIP_INTRO:-}" ]; then
   intro="$L_INTRO_HEAD
 
 $(if noc_has_remote; then echo "$L_INTRO_REMOTE"; else echo "$L_INTRO_OFFICE"; fi)
@@ -74,19 +77,21 @@ $L_INTRO_ITEM_LOGIN"
   intro="$intro
 
 $L_INTRO_TAIL"
-  [ "$(noc_choose "$intro" "$L_BTN_CANCEL" "$L_BTN_START")" = "$L_BTN_START" ] || exit 0
+  [ "$(noc_choose "$intro" "$L_BTN_START" "$L_BTN_CANCEL")" = "$L_BTN_START" ] || exit 0
 fi
 
 # --- Only one installer at a time ------------------------------------------------------
-if ! mkdir "$D/install.lock" 2>/dev/null; then
-  holder="$(cat "$D/install.lock/pid" 2>/dev/null)"
-  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
+# One installer at a time: re-run this script under a kernel lock (see noc_locked).
+if [ -z "${NOC_LOCKED:-}" ]; then
+  [ -d "$D/install.lock" ] && rm -rf "$D/install.lock"   # lock folder of 1.0.x
+  NOC_LOCKED=1 NOC_SKIP_INTRO=1 noc_locked "$D/install.lock" /bin/bash "$0" "$@"; rc=$?
+  if [ $rc = 75 ]; then
     [ $MODE = install ] && { noc_alert "$L_ALREADY_RUNNING" note 20; exit 0; }
     exit 3   # update: report "not installed" so the updater does not claim success
   fi
-  rm -rf "$D/install.lock"; mkdir "$D/install.lock"
+  exit $rc
 fi
-echo $$ > "$D/install.lock/pid"
+unset NOC_LOCKED NOC_SKIP_INTRO
 rm -f "$D/install-error"
 trap finish EXIT
 
@@ -96,37 +101,21 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 for f in agent.sh install.sh uninstall.sh lib lang bin update-keys VERSION; do
   cp -R "$HERE/$f" "$STAGE/" 2>/dev/null || break
 done
-[ -s "$STAGE/agent.sh" ] && [ -x "$STAGE/bin/opener" ] && [ -x "$STAGE/bin/sleepwatch" ] \
-  && [ -s "$STAGE/update-keys" ] && [ -s "$STAGE/VERSION" ] || fail "$L_COPY_FAILED"
+[ -s "$STAGE/agent.sh" ] && [ -x "$STAGE/bin/nas-on-click" ] && [ -x "$STAGE/bin/sleepwatch" ] \
+  && [ -s "$STAGE/lib/smb-shares.exp" ] && [ -s "$STAGE/update-keys" ] && [ -s "$STAGE/VERSION" ] \
+  || fail "$L_COPY_FAILED"
 if [ $MODE = install ]; then cp "$CFG" "$D/config.new" || fail "$L_COPY_FAILED"; fi
 
 # --- NAS account -------------------------------------------------------------------------
-# Lists the shares this user can see; skips names that could act as a path.
-write_shares() {
-  printf '%s\n' "$1" | NOC_EXCLUDE="$EXCLUDE_SHARES" perl -CSD -ne '
-    BEGIN { %x = map { $_ => 1 } (split(" ", $ENV{NOC_EXCLUDE}), q{IPC$}) }
-    next unless /^(.+?)\s+Disk(\s|$)/;
-    my $n = $1;
-    next if $n =~ m{/} || $n =~ /\.\./ || $n =~ /^\./ || $x{$n};
-    print "$n\n";' > "$D/shares"
-}
-
-normalize_user() {
-  if [ "$USERNAME_UPPERCASE" = yes ]; then
-    # Upper case, except dotless i (U+0131), which the NAS keeps in lower case.
-    printf '%s' "$1" | perl -CSD -MUnicode::Normalize -ne '$t = NFC($_); $t =~ s/^\s+|\s+$//g; $t =~ s/\x{131}/\x{1}/g; $t = uc $t; $t =~ s/\x{1}/\x{131}/g; print $t'
-  else
-    printf '%s' "$1" | perl -CSD -MUnicode::Normalize -ne '$t = NFC($_); $t =~ s/^\s+|\s+$//g; print $t'
-  fi
-}
+# list_shares HOST USER (password on stdin): prints `smbutil view` output. The password
+# is typed into smbutil's prompt through a pseudo-terminal by an expect script.
+list_shares() { /usr/bin/expect -f "$STAGE/lib/smb-shares.exp" "$1" "$(noc_enc "$2")" 2>/dev/null; }
 
 nas_account() {
-  local host stored ok=0 list rc tries=0 user pass acct
+  local host ok=0 list rc tries=0 user pass acct
   say "NAS account"
-  # WARP first: the office check rests on values that are not secret.
-  if noc_remote_ok; then host="$REMOTE_HOST"
-  elif noc_in_office; then host="$OFFICE_HOST"
-  else
+  noc_status "$L_STATUS_ACCOUNT"
+  if ! host="$(noc_pick_host)"; then
     if noc_has_remote; then noc_alert "$L_NAS_UNREACHABLE_WARP" stop; else noc_alert "$L_NAS_UNREACHABLE_OFFICE" stop; fi
     cancel "$L_NAS_UNREACHABLE_OFFICE"
   fi
@@ -136,48 +125,56 @@ nas_account() {
     acct="$(noc_keychain_account)"
     [ -n "$acct" ] && printf '%s' "$acct" > "$D/user"
   fi
-  if [ -f "$D/user" ] && stored="$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$(cat "$D/user")" -w 2>/dev/null)"; then
-    list="$(smbutil view -N "//$(noc_enc "$(cat "$D/user")"):$(noc_enc "$stored")@$host" 2>/dev/null </dev/null)"
-    if [ $? = 0 ] && [ -n "$list" ]; then ok=1; write_shares "$list"; rm -f "$D/password-rejected"
-    else echo "The stored NAS password did not work; asking again."; fi
-    unset stored
+  if [ -f "$D/user" ] && noc_password "$(cat "$D/user")" >/dev/null; then
+    list="$(noc_password "$(cat "$D/user")" | list_shares "$host" "$(cat "$D/user")")"; rc=$?
+    if [ $rc = 0 ] && [ -n "$list" ]; then
+      ok=1; printf '%s\n' "$list" | noc_parse_shares > "$D/shares"; rm -f "$D/password-rejected"
+    else echo "The stored NAS password did not work (code $rc); asking again."; fi
   fi
   if [ $ok = 1 ]; then echo "NAS account already set up: $(cat "$D/user")"; return 0; fi
 
-  noc_notify "$L_ENTER_CREDS" "$L_NOTIFY_TITLE"
+  noc_status "$L_ENTER_CREDS"
   user="$(id -F 2>/dev/null)"
   while [ $tries -lt 3 ]; do
-    user="$(noc_ask_text "$L_ASK_USER" "$user" no)" || cancel "$L_CANCELLED"
+    user="$(noc_ask_text "$L_ASK_USER" "$user" plain)" || cancel "$L_CANCELLED"
     if [ -z "$(printf '%s' "$user" | tr -d '[:space:]')" ]; then
       noc_alert "$L_USER_EMPTY"; user=""; continue
     fi
-    user="$(normalize_user "$user")"
-    pass="$(noc_ask_text "$L_ASK_PASS" "" yes)" || cancel "$L_CANCELLED"
-    list="$(smbutil view -N "//$(noc_enc "$user"):$(noc_enc "$pass")@$host" 2>"$D/smb-error.txt" </dev/null)"; rc=$?
+    user="$(noc_normalize_user "$user")"
+    pass="$(noc_ask_text "$L_ASK_PASS" "" secure)" || cancel "$L_CANCELLED"
+    noc_status "$L_STATUS_ACCOUNT"
+    list="$(printf '%s\n' "$pass" | list_shares "$host" "$user")"; rc=$?
     if [ $rc = 0 ] && [ -n "$list" ]; then
-      security add-generic-password -U -s "$KEYCHAIN_SERVICE" -a "$user" -w "$pass" -l "$APP_NAME"
+      printf '%s\n' "$pass" | "$STAGE/bin/nas-on-click" keychain-set --service "$KEYCHAIN_SERVICE" --account "$user" --label "$APP_NAME" \
+        || { unset pass; fail "$L_UNEXPECTED"; }
       printf '%s' "$user" > "$D/user"
       rm -f "$D/password-rejected"
-      write_shares "$list"
+      printf '%s\n' "$list" | noc_parse_shares > "$D/shares"
       echo "Account verified. Shares: $(tr '\n' ' ' < "$D/shares")"
       break
     fi
-    echo "smbutil exit code $rc: $(head -c 300 "$D/smb-error.txt")"
+    echo "Share listing failed with code $rc."
     if [ $rc = 77 ]; then
       tries=$((tries + 1))
-      if [ $tries -lt 3 ]; then noc_alert "$L_BAD_CREDS $(printf "$L_RETRY_N" "$tries")"
-      else noc_alert "$L_BAD_CREDS $L_NO_MORE_TRIES"; unset pass; rm -f "$D/smb-error.txt"; cancel "$L_CREDS_FAILED_3"; fi
+      if [ $tries -lt 3 ]; then noc_alert "$L_BAD_CREDS $(noc_fmt "$L_RETRY_N" "$tries")"
+      else noc_alert "$L_BAD_CREDS $L_NO_MORE_TRIES"; unset pass; cancel "$L_CREDS_FAILED_3"; fi
     else
-      [ "$(noc_choose "$(printf "$L_CONN_PROBLEM" "$rc")" "$L_BTN_CANCEL" "$L_BTN_RETRY" "" caution)" = "$L_BTN_RETRY" ] \
-        || { unset pass; rm -f "$D/smb-error.txt"; cancel "$L_CANCELLED"; }
+      [ "$(noc_choose "$(noc_fmt "$L_CONN_PROBLEM" "$rc")" "$L_BTN_RETRY" "$L_BTN_CANCEL" "" caution)" = "$L_BTN_RETRY" ] \
+        || { unset pass; cancel "$L_CANCELLED"; }
     fi
   done
   unset pass
-  rm -f "$D/smb-error.txt"
 }
 
 # --- Cloudflare WARP: install and enrol in the team --------------------------------------
-CLOUDFLARE_SIGNER="Developer ID Installer: Cloudflare Inc. (68WVV388M8)"
+# The leaf certificate of the WARP installer must be exactly Cloudflare's Developer ID.
+CLOUDFLARE_SIGNER_RE='^[[:space:]]*1\. Developer ID Installer: Cloudflare Inc\. \(68WVV388M8\)$'
+warp_pkg_trusted() {
+  local sig
+  sig="$(/usr/sbin/pkgutil --check-signature "$1" 2>/dev/null)" || return 1
+  printf '%s\n' "$sig" | grep -q "Status: signed by a developer certificate issued by Apple for distribution" \
+    && printf '%s\n' "$sig" | grep -Eq "$CLOUDFLARE_SIGNER_RE"
+}
 MDM="/Library/Application Support/Cloudflare/mdm.xml"
 
 warp_setup() {
@@ -188,15 +185,29 @@ warp_setup() {
   if [ -d "/Applications/Cloudflare WARP.app" ]; then echo "WARP is already installed."
   else
     pkg="$D/Cloudflare_WARP.pkg"
-    noc_notify "$L_WARP_DOWNLOADING" "$L_NOTIFY_TITLE"
+    noc_status "$L_WARP_DOWNLOADING"
     curl -fsSL --proto '=https' --proto-redir '=https' --max-time 900 -o "$pkg" "https://downloads.cloudflareclient.com/v1/download/macos/ga" || fail "$L_WARP_DL_FAIL"
-    sig="$(pkgutil --check-signature "$pkg")"
-    printf '%s' "$sig" | grep -q "Status: signed by a developer certificate issued by Apple for distribution" \
-      && printf '%s' "$sig" | grep -qF "$CLOUDFLARE_SIGNER" || { rm -f "$pkg"; fail "$L_WARP_SIG_FAIL"; }
+    warp_pkg_trusted "$pkg" || { rm -f "$pkg"; fail "$L_WARP_SIG_FAIL"; }
     echo "Signature verified. Installing (one Mac password prompt)."
-    # As root: copy to a root-owned temp folder, verify the signature again there, write
-    # the team name for WARP (only if no MDM file exists yet), then install.
-    cmd="T=\$(mktemp -d /private/tmp/noc.XXXXXX) && cp $(printf '%q' "$pkg") \$T/w.pkg && S=\$(/usr/sbin/pkgutil --check-signature \$T/w.pkg) && echo \"\$S\" | grep -q 'issued by Apple for distribution' && echo \"\$S\" | grep -qF '$CLOUDFLARE_SIGNER' && { M='/Library/Application Support/Cloudflare'; [ -e \"\$M/mdm.xml\" ] || { mkdir -p \"\$M\" && printf '%s\n' '<dict>' '  <key>organization</key>' '  <string>$WARP_TEAM</string>' '  <key>onboarding</key>' '  <false/>' '</dict>' > \"\$M/mdm.xml\"; }; } && /usr/sbin/installer -pkg \$T/w.pkg -target /; R=\$?; rm -rf \$T; exit \$R"
+    # Runs as root. The package is copied into a root-owned folder and its signature is
+    # checked again there, so it cannot be swapped after the check above. The team name
+    # is written for WARP only when no MDM file exists yet. WARP_TEAM is limited to
+    # [a-z0-9-] by the config check.
+    read -r -d '' cmd <<ROOT
+set -e
+T=\$(mktemp -d /private/tmp/noc.XXXXXX)
+trap 'rm -rf "\$T"' EXIT
+cp $(printf '%q' "$pkg") "\$T/w.pkg"
+S=\$(/usr/sbin/pkgutil --check-signature "\$T/w.pkg")
+printf '%s\\n' "\$S" | grep -q 'issued by Apple for distribution'
+printf '%s\\n' "\$S" | grep -Eq '$CLOUDFLARE_SIGNER_RE'
+M='/Library/Application Support/Cloudflare'
+if [ ! -e "\$M/mdm.xml" ]; then
+  mkdir -p "\$M"
+  printf '%s\\n' '<dict>' '  <key>organization</key>' '  <string>$WARP_TEAM</string>' '  <key>onboarding</key>' '  <false/>' '</dict>' > "\$M/mdm.xml"
+fi
+/usr/sbin/installer -pkg "\$T/w.pkg" -target /
+ROOT
     NOC_CMD="$cmd" NOC_PROMPT="$L_WARP_ADMIN_PROMPT" osascript -e 'activate' \
       -e 'do shell script (do shell script "printenv NOC_CMD") with prompt (do shell script "printenv NOC_PROMPT") with administrator privileges' \
       >/dev/null 2>"$D/warp-error.txt"; rc=$?
@@ -214,11 +225,11 @@ warp_setup() {
   say "WARP enrolment ($WARP_TEAM)"
   if noc_warp_enrolled; then echo "Already enrolled."
   else
-    noc_notify "$L_LOGIN_NOTIFY" "$L_NOTIFY_TITLE"
+    noc_status "$L_LOGIN_NOTIFY"
     ( noc_alert "$L_LOGIN_DIALOG" note 60 & )
     old="$(noc_warp_org)"
     if "$WARP_CLI" --accept-tos registration show >/dev/null 2>&1; then
-      [ "$(noc_choose "$(printf "$L_WARP_SWITCH" "${old:-$L_WARP_PERSONAL}")" "$L_BTN_CANCEL" "$L_BTN_CONFIRM" "" caution)" = "$L_BTN_CONFIRM" ] \
+      [ "$(noc_choose "$(noc_fmt "$L_WARP_SWITCH" "${old:-$L_WARP_PERSONAL}")" "$L_BTN_CANCEL" "$L_BTN_CONFIRM" "" caution)" = "$L_BTN_CONFIRM" ] \
         || cancel "$L_WARP_SWITCH_DECLINED"
       "$WARP_CLI" --accept-tos registration delete >/dev/null 2>&1
     fi
@@ -233,13 +244,14 @@ warp_setup() {
     fi
     for i in $(seq 1 120); do
       noc_warp_enrolled && break
-      [ $((i % 12)) = 0 ] && noc_notify "$(printf "$L_LOGIN_PROGRESS" "$((i / 12))")" "$L_NOTIFY_TITLE"
+      [ $((i % 12)) = 0 ] && noc_status "$(noc_fmt "$L_LOGIN_PROGRESS" "$((i / 12))")"
       sleep 5
     done
     noc_warp_enrolled || fail "$L_LOGIN_TIMEOUT"
     ENROLL_PID=""
     echo "Enrolled."
   fi
+  noc_status "$L_STATUS_WARP"
   "$WARP_CLI" --accept-tos connect >/dev/null 2>&1
   for _ in $(seq 1 24); do noc_warp_connected && break; sleep 5; done
   noc_warp_connected || { echo "WARNING: WARP did not connect (VPN permission?)"; WARP_NOTE="$L_WARP_NOT_CONNECTED"; }
@@ -266,6 +278,38 @@ our_launcher() {
 }
 
 FOLDER="$HOME/$FOLDER_NAME"
+# The system's network-share icon, copied from this Mac at install time (never shipped).
+share_icon() {
+  local base=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources
+  if [ -f "$base/GenericSharepoint.icns" ]; then echo "$base/GenericSharepoint.icns"; else echo "$base/GenericFolderIcon.icns"; fi
+}
+
+# The helper app shows dialogs and the progress window with the app's name and icon.
+make_helper() {
+  local h="$APP/Helper.app"
+  rm -rf "$h"
+  mkdir -p "$h/Contents/MacOS" "$h/Contents/Resources"
+  cp "$APP/bin/nas-on-click" "$h/Contents/MacOS/nas-on-click"
+  cp "$(share_icon)" "$h/Contents/Resources/app.icns" 2>/dev/null
+  cat > "$h/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>$BUNDLE_ID.helper</string>
+  <key>CFBundleName</key><string>$(noc_xml "$APP_NAME")</string>
+  <key>CFBundleDisplayName</key><string>$(noc_xml "$APP_NAME")</string>
+  <key>CFBundleExecutable</key><string>nas-on-click</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>app</string>
+  <key>CFBundleShortVersionString</key><string>$(cat "$APP/VERSION")</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NOCRole</key><string>helper</string>
+</dict></plist>
+PLIST
+  codesign --force -s - "$h" >/dev/null 2>&1
+}
+
 make_launchers() {
   local icon n=0 s app id
   mkdir -p "$FOLDER"
@@ -277,8 +321,7 @@ make_launchers() {
     our_launcher "$app" && rm -rfx "$app"
   done < <(find "$FOLDER" -mindepth 1 -maxdepth 1 -type d -name '*.app')
 
-  icon=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericSharepoint.icns
-  [ -f "$icon" ] || icon=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/GenericFolderIcon.icns
+  icon="$(share_icon)"
   while IFS= read -r s; do
     [ -n "$s" ] || continue
     case "$s" in */*|*..*|.*) continue ;; esac
@@ -287,7 +330,7 @@ make_launchers() {
     n=$((n + 1))
     id="$NOC_LAUNCHER_PREFIX.k$(printf '%s' "$s" | md5 | cut -c1-12)"
     mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-    cp "$APP/bin/opener" "$app/Contents/MacOS/opener"
+    cp "$APP/bin/nas-on-click" "$app/Contents/MacOS/nas-on-click"
     cp "$icon" "$app/Contents/Resources/folder.icns" 2>/dev/null
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -295,12 +338,13 @@ make_launchers() {
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>$id</string>
   <key>CFBundleName</key><string>$(noc_xml "$APP_NAME")</string>
-  <key>CFBundleExecutable</key><string>opener</string>
+  <key>CFBundleExecutable</key><string>nas-on-click</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleIconFile</key><string>folder</string>
   <key>CFBundleShortVersionString</key><string>$(cat "$APP/VERSION")</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
+  <key>NOCRole</key><string>launcher</string>
   <key>NOCShare</key><string>$(noc_xml "$s")</string>
   <key>NOCRequestDir</key><string>$(noc_xml "$D/requests")</string>
   <key>NOCAgentLabel</key><string>$NOC_AGENT_LABEL</string>
@@ -310,7 +354,7 @@ make_launchers() {
 </dict></plist>
 PLIST
     codesign --force -s - "$app" >/dev/null 2>&1
-    "$APP/bin/opener" --hide-extension "$app"
+    "$APP/bin/nas-on-click" hide-extension "$app"
     touch "$app"
   done < "$D/shares"
   echo "$n folder launchers created."
@@ -363,8 +407,12 @@ deploy() {
   xattr -cr "$APP" 2>/dev/null
   chmod 700 "$APP/agent.sh" "$APP/install.sh" "$APP/uninstall.sh"
   [ $MODE = install ] && { mv -f "$D/config.new" "$D/config"; chmod 600 "$D/config"; }
-  mkdir -p "$D/requests"; rm -f "$D/requests/"* 2>/dev/null; rm -rf "$D/agent.lock"
+  mkdir -p "$D/requests"; rm -f "$D/requests/"* 2>/dev/null
+  # 1.0.x used lock folders; lockf needs plain files (never delete a held lock file).
+  for l in "$D/agent.lock" "$D/update.lock"; do [ -d "$l" ] && rm -rf "$l"; done
 
+  make_helper
+  noc_status "$L_STATUS_LAUNCHERS"
   make_launchers || { rm -rf "$tmpd"; fail "$L_NO_SHARES"; }
 
   if [ $MODE = install ] || [ $changed = 1 ]; then
@@ -386,7 +434,7 @@ if [ $MODE = update ]; then
   exit 0
 fi
 
-noc_notify "$L_STARTED" "$L_NOTIFY_TITLE"
+noc_status "$L_STARTED"
 # In the office the account is checked first (no WARP needed); elsewhere WARP comes first.
 if noc_in_office || ! noc_has_remote; then
   nas_account
@@ -429,8 +477,6 @@ $L_FINAL_SIDEBAR"
 noc_has_remote && body="$body
 
 $L_FINAL_WARP"
-NOC_HEAD="$L_FINAL_TITLE" NOC_BODY="$body" NOC_B1="$L_BTN_GOTIT" osascript \
-  -e 'activate' \
-  -e 'display alert (do shell script "printenv NOC_HEAD") message (do shell script "printenv NOC_BODY") as critical buttons {(do shell script "printenv NOC_B1")} default button 1' \
-  </dev/null >/dev/null 2>&1
+noc_status_done
+noc_ui --headline "$L_FINAL_TITLE" --message "$body" --style stop --button "$L_BTN_GOTIT" >/dev/null
 exit 0

@@ -38,11 +38,10 @@ noc_fetch() {
 noc_update_check() {
   local tmp
   noc_update_due || return 0
-  noc_lock "$D/update.lock" "agent.sh" || return 0
   date +%s > "$D/last-update-check"
-  tmp="$(mktemp -d "$D/update.XXXXXX")" || { rm -rf "$D/update.lock"; return 0; }
+  tmp="$(mktemp -d "$D/update.XXXXXX")" || return 0
   noc_update_run "$tmp"
-  rm -rf "$tmp" "$D/update.lock"
+  rm -rf "$tmp"
 }
 
 noc_update_run() {
@@ -51,7 +50,7 @@ noc_update_run() {
     && noc_fetch "$UPDATE_URL/manifest.sig" "$tmp/manifest.sig" 4096 \
     || { noc_log "update: could not download the manifest"; return 0; }
 
-  info="$("$APP/bin/opener" --verify-manifest "$tmp/manifest.json" "$tmp/manifest.sig" \
+  info="$("$APP/bin/nas-on-click" verify-manifest "$tmp/manifest.json" "$tmp/manifest.sig" \
             "$APP/update-keys" "$NOC_PRODUCT" "$(cat "$APP/VERSION")")"
   case $? in
     0) ;;
@@ -61,29 +60,29 @@ noc_update_run() {
   IFS=$'\t' read -r ver file sha size notes <<< "$info"
 
   # "Not now" is the default button, so pressing Return never installs.
-  choice="$(noc_choose "$(printf "$L_UPDATE_AVAILABLE" "$ver" "$notes")" "$L_BTN_INSTALL" "$L_BTN_LATER" 600 note)"
+  choice="$(noc_choose "$(noc_fmt "$L_UPDATE_AVAILABLE" "$ver" "$notes")" "$L_BTN_LATER" "$L_BTN_INSTALL" 600 note)"
   [ "$choice" = "$L_BTN_INSTALL" ] || { noc_log "update: $ver postponed"; return 0; }
 
   if ! noc_fetch "$UPDATE_URL/$file" "$tmp/$file" $NOC_PACKAGE_MAX \
      || [ "$(stat -f %z "$tmp/$file")" != "$size" ] \
      || [ "$(shasum -a 256 "$tmp/$file" | awk '{ print $1 }')" != "$sha" ]; then
     noc_log "update: package download failed or does not match the manifest"
-    noc_notify "$L_UPDATE_FAILED"; return 0
+    noc_alert "$L_UPDATE_FAILED" caution 30; return 0
   fi
   mkdir "$tmp/pkg" && tar -xzf "$tmp/$file" -C "$tmp/pkg" 2>/dev/null && [ -f "$tmp/pkg/install.sh" ] \
-    || { noc_log "update: package could not be unpacked"; noc_notify "$L_UPDATE_FAILED"; return 0; }
+    || { noc_log "update: package could not be unpacked"; noc_alert "$L_UPDATE_FAILED" caution 30; return 0; }
 
   local before; before="$(cat "$APP/VERSION")"
   if /bin/bash "$tmp/pkg/install.sh" --update "$D/config" >> "$LOG" 2>&1 \
      && [ "$(cat "$APP/VERSION" 2>/dev/null)" = "$ver" ]; then
     noc_log "update: installed $ver"
-    noc_notify "$(printf "$L_UPDATE_DONE" "$ver")"
+    noc_alert "$(noc_fmt "$L_UPDATE_DONE" "$ver")" note 15
   else
-    if [ "$(cat "$APP/VERSION" 2>/dev/null)" = "$before" ] && [ -x "$APP/bin/opener" ]; then
+    if [ "$(cat "$APP/VERSION" 2>/dev/null)" = "$before" ] && { [ -x "$APP/bin/nas-on-click" ] || [ -x "$APP/bin/opener" ]; }; then
       noc_log "update: install of $ver failed, still on $before"
     else
       noc_log "update: install of $ver failed and $before could not be confirmed - run setup again"
     fi
-    noc_notify "$L_UPDATE_FAILED"
+    noc_alert "$L_UPDATE_FAILED" caution 30
   fi
 }

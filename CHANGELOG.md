@@ -6,6 +6,30 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-11
+
+### Security
+- The NAS password no longer appears in any process's arguments: mounting uses NetFS
+  with the password on stdin, the Keychain is written through the Security framework,
+  and setup lists shares by typing into `smbutil`'s prompt through a pseudo-terminal.
+- System login dialogs are disabled while mounting, so no second Keychain item can be
+  created by accident.
+- The WARP installer's leaf certificate is matched exactly.
+- Release packages are built by GitHub Actions with a build provenance attestation,
+  which the maintainer verifies before signing the manifest.
+
+### Changed
+- Dialogs, the setup app and a new setup progress window are native macOS windows with
+  the app's name and icon (no more AppleScript windows); notifications were dropped.
+- Locks use `lockf(1)`: the kernel releases them when a process ends.
+- An expired ARP entry no longer makes the agent drop an office mount.
+- A click that arrives just as a run ends is served immediately.
+
+### Added
+- ARCHITECTURE.md: components, flows, invariants, state files, threat model, design decisions.
+- Behaviour tests for the agent, installer and uninstaller with shimmed system tools.
+- OpenSSF Scorecard, leak scan in CI, CODEOWNERS and a pull request template.
+
 ## [1.0.1] - 2026-11-11
 
 ### Added

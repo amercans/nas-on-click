@@ -1,5 +1,10 @@
 # nas-on-click
 
+[![CI](https://github.com/amercans/nas-on-click/actions/workflows/ci.yml/badge.svg)](https://github.com/amercans/nas-on-click/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/amercans/nas-on-click/badge)](https://scorecard.dev/viewer/?uri=github.com/amercans/nas-on-click)
+[![Release](https://img.shields.io/github/v/release/amercans/nas-on-click)](https://github.com/amercans/nas-on-click/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Click-to-mount NAS shares for macOS. You get one icon for each share. A double-click mounts the share and opens it in Finder:
 - directly when the Mac is on the office network,
 - through [Cloudflare WARP](https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/) when it is anywhere else.
@@ -31,7 +36,7 @@ nas-on-click mounts a share only when someone asks for it. It also unmounts shar
              in the office?  ───────────┤  gateway IP + gateway MAC (ARP cache) + subnet
              WARP connected? ───────────┤  enrolled in your team + NAS port reachable
                                         ▼
-                         mount (password from the login Keychain)
+                  mount via NetFS (password: Keychain → pipe → stdin)
                                         ▼
                                  open in Finder
 ```
@@ -45,7 +50,11 @@ nas-on-click mounts a share only when someone asks for it. It also unmounts shar
 
   This keeps the password away from look-alike networks for anyone who isn't holding your config (see the limitations below).
 - **A rejected password is never sent again.** The agent asks the user for the new password instead, so the NAS auto-block does not lock the account.
+- **The password never reaches a command line.** It travels from the Keychain to the mount helper through a pipe only, so other users on the Mac cannot read it from the process list.
+- **Native windows.** Dialogs and the setup progress window are real macOS windows with the app's own name and icon.
 - **Safe uninstall.** `uninstall.sh` refuses to delete anything while a share is still mounted.
+
+The design, the invariants it keeps, the threat model and the reasoning behind each trade-off are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Requirements
 
@@ -60,10 +69,10 @@ nas-on-click mounts a share only when someone asks for it. It also unmounts shar
 git clone https://github.com/amercans/nas-on-click.git
 cd nas-on-click
 cp config.example my-office.conf      # fill in your own values
-tools/make-package.sh --config my-office.conf
+tools/make-package.sh --config my-office.conf [--icon my-icon.icns]
 ```
 
-This produces `dist/package/<INSTALLER_NAME>.app` and a zip of it. Hand it out and ask people to open it. The installer:
+This produces `dist/package/<INSTALLER_NAME>/<INSTALLER_NAME>.app` and a zip of it. Hand it out and ask people to open it. The installer:
 
 1. asks for the NAS user name and password, checks them and stores them in the login Keychain;
 2. if remote access is configured, installs Cloudflare WARP. The package's Cloudflare signature is checked before installing. It then enrols the Mac in your team (one browser sign-in);
@@ -99,13 +108,15 @@ Installed copies update themselves, but only with the user's consent and only fr
   - that the package has exactly the size and SHA-256 listed in the manifest.
 - **How it installs:** only after the user agrees. If the install fails, the previous version is restored.
 
-Publishing works the same way whoever runs it:
+Releases are built by GitHub Actions from the tagged commit, with a [build provenance attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations). The maintainer verifies that attestation and signs the manifest on their own Mac, so the signing key never reaches CI and the package never comes from a laptop:
 
 ```sh
 swift tools/signer.swift keygen     # once: creates the key in your login Keychain, prints the public key
 swift tools/signer.swift backup ~/Desktop/signing-key.txt   # once: keep this file offline
 tools/release.sh 1.1.0 "Short note shown to users"
 ```
+
+Anyone can check a package: `gh attestation verify nas-on-click-1.1.0.tar.gz --repo amercans/nas-on-click`.
 
 **For a fork:**
 1. Put your own public key in `keys/update-keys.txt`.
@@ -121,11 +132,10 @@ Updates replace the scripts, helpers and launchers. They do not touch:
 
 ## Security model
 
-- **Credentials.** The NAS password is stored in the user's login Keychain. Mount errors are discarded. The installer logs `smbutil`'s error line, which states the reason ("authentication rejected"), not the password.
+- **Credentials.** The NAS password is stored in the user's login Keychain and only ever moves through pipes: to the NetFS mount helper, to the Keychain helper, and into `smbutil`'s password prompt (through a pseudo-terminal) when setup lists the shares. It never appears in process arguments or environment variables.
 - **What updates need to succeed.** An attacker needs your signing key *and* the ability to publish where `UPDATE_URL` points. Even then, nothing is installed without the user's consent. Turn on [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) for the repository.
 - **Known limitations:**
-  - **Password in command-line arguments.** While a share is being mounted, checked or saved, the password briefly appears in the arguments of `smbutil`, `mount_smbfs` or `security` (and in the AppleScript environment). Other processes of the same user and root can see it during that time.
-  - **Same-user access to the Keychain item.** The NAS password item trusts the `security` tool, so other programs running as the same user can read it.
+  - **Same-user access to the Keychain item.** The NAS password item trusts `/usr/bin/security`, so other programs running as the same user can read it. Pinning it to the app's own signature would need a paid Developer ID (see ARCHITECTURE.md).
   - **The office check is not an authentication boundary.** The gateway address, gateway MAC and subnet are in every installer and visible on the office network. Someone with that knowledge can imitate the office on another network. A Mac without a connected WARP would then send its NAS sign-in there: an NTLMv2 exchange, not the plain password, but one that can be attacked offline. Use strong NAS passwords, or leave the office values empty to always use WARP.
   - **No notarization.** The installer, helpers and launchers are ad-hoc signed.
   - **No expiry on update metadata.** An attacker who controls the network can withhold updates, but cannot install anything.
@@ -152,6 +162,7 @@ This removes the background jobs, the launchers, the Keychain item and the data 
 ```sh
 tools/build.sh                         # universal helpers + payload in dist/payload
 tests/run.sh                           # config, signature and update-flow tests
+tests/agent.sh                         # agent, installer and uninstaller behaviour (system tools shimmed)
 git config core.hooksPath tools/hooks  # run tools/leak-scan.sh before every push
 ```
 

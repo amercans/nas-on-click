@@ -1,8 +1,15 @@
 # shellcheck shell=bash disable=SC2034
 # Helpers shared by install.sh, agent.sh and uninstall.sh.
 # Expects noc_load_config and noc_load_lang to have run.
+#
+# The NAS password never appears in a process's arguments or environment: it travels
+# through pipes only (Keychain -> `security ... -w` -> stdin of the helper or of the
+# expect script).
 
-WARP_CLI=/usr/local/bin/warp-cli
+# Tools are referenced through variables so the test suite can substitute them.
+: "${WARP_CLI:=/usr/local/bin/warp-cli}"
+: "${DISKUTIL:=/usr/sbin/diskutil}"
+: "${SMBUTIL_EXP:=}"
 ME="$(id -un)"
 D="$NOC_DIR"
 APP="$D/app"
@@ -10,75 +17,62 @@ LOG="$D/agent.log"
 
 noc_log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 
-# --- Dialogs ------------------------------------------------------------------
-# Text is passed through environment variables (read back with printenv) so that
-# quotes and non-ASCII letters in messages can never break the AppleScript.
+# noc_timeout SECONDS COMMAND...: run COMMAND, killing it after SECONDS.
+noc_timeout() { local s="$1"; shift; perl -e 'alarm shift; exec @ARGV' "$s" "$@"; }
 
-# noc_alert MESSAGE [stop|caution|note] [timeout-seconds]
-noc_alert() {
-  local giving=""
-  [ -n "${3:-}" ] && giving="giving up after $3"
-  NOC_MSG="$1" NOC_TITLE="$APP_NAME" NOC_B1="$L_BTN_OK" osascript \
-    -e 'activate' \
-    -e "display dialog (do shell script \"printenv NOC_MSG\") buttons {(do shell script \"printenv NOC_B1\")} default button 1 $giving with title (do shell script \"printenv NOC_TITLE\") with icon ${2:-caution}" \
-    </dev/null >/dev/null 2>&1
+# noc_fmt TEMPLATE VALUE...: replace each %s in TEMPLATE with the next VALUE.
+# Used instead of printf so that text from the config can never act as a format.
+noc_fmt() {
+  local rest="$1" out="" v; shift
+  for v in "$@"; do
+    case "$rest" in *%s*) out="$out${rest%%\%s*}$v"; rest="${rest#*%s}" ;; esac
+  done
+  printf '%s' "$out$rest"
 }
 
-# noc_choose MESSAGE BUTTON1 BUTTON2 [timeout] [icon]
-# BUTTON2 is the default (Return). Prints the chosen button; prints nothing when the
-# dialog timed out or was closed.
-noc_choose() {
-  local giving=""
-  [ -n "${4:-}" ] && giving="giving up after $4"
-  NOC_MSG="$1" NOC_TITLE="$APP_NAME" NOC_B1="$2" NOC_B2="$3" osascript \
-    -e 'activate' \
-    -e "set r to display dialog (do shell script \"printenv NOC_MSG\") buttons {(do shell script \"printenv NOC_B1\"), (do shell script \"printenv NOC_B2\")} default button 2 $giving with title (do shell script \"printenv NOC_TITLE\") with icon ${5:-note}" \
-    -e 'set g to false' -e 'try' -e 'set g to gave up of r' -e 'end try' \
-    -e 'if g then return ""' -e 'return button returned of r' \
-    </dev/null 2>/dev/null
-}
+# --- Locks -----------------------------------------------------------------------------
+# noc_locked LOCKFILE COMMAND...: run COMMAND holding an flock on LOCKFILE (lockf(1)).
+# The kernel drops the lock when the process ends, so a crash never leaves a stale
+# lock. Returns 75 at once when another process holds it.
+noc_locked() { local f="$1"; shift; /usr/bin/lockf -s -t 0 "$f" "$@"; }
 
-# noc_ask_text MESSAGE DEFAULT HIDDEN(yes|no) [timeout] [icon] [ok-label]
-# Prints the text entered; returns 1 when cancelled or timed out.
+# --- Native dialogs ------------------------------------------------------------------
+# The helper app shows the windows with the app's name and icon. The installer passes
+# its own binary in NOC_UI before the helper exists.
+noc_ui_bin() {
+  if [ -x "$APP/Helper.app/Contents/MacOS/nas-on-click" ]; then echo "$APP/Helper.app/Contents/MacOS/nas-on-click"
+  elif [ -n "${NOC_UI:-}" ] && [ -x "$NOC_UI" ]; then echo "$NOC_UI"
+  else echo "$APP/bin/nas-on-click"; fi
+}
+noc_ui() { "$(noc_ui_bin)" ui --title "$APP_NAME" "$@" </dev/null 2>/dev/null; }
+
+# noc_alert MESSAGE [note|caution|stop] [timeout]
+noc_alert() { noc_ui --message "$1" --style "${2:-caution}" --button "$L_BTN_OK" ${3:+--timeout "$3"} >/dev/null; }
+
+# noc_choose MESSAGE DEFAULT-BUTTON OTHER-BUTTON [timeout] [style]
+# Prints the chosen button; nothing when the dialog timed out.
+noc_choose() { noc_ui --message "$1" --style "${5:-note}" --button "$2" --button "$3" ${4:+--timeout "$4"}; }
+
+# noc_ask_text MESSAGE DEFAULT secure|plain [timeout] [style] [ok-label]
+# Prints the text; returns 1 when cancelled or timed out.
 noc_ask_text() {
-  local hidden="" giving=""
-  [ "$3" = yes ] && hidden="with hidden answer"
-  [ -n "${4:-}" ] && giving="giving up after $4"
-  NOC_MSG="$1" NOC_DEF="$2" NOC_TITLE="$APP_NAME" NOC_B1="$L_BTN_CANCEL" NOC_B2="${6:-$L_BTN_OK}" osascript \
-    -e 'activate' \
-    -e "set r to display dialog (do shell script \"printenv NOC_MSG\") default answer (do shell script \"printenv NOC_DEF\") $hidden buttons {(do shell script \"printenv NOC_B1\"), (do shell script \"printenv NOC_B2\")} default button 2 cancel button 1 $giving with title (do shell script \"printenv NOC_TITLE\") with icon ${5:-note}" \
-    -e 'set g to false' -e 'try' -e 'set g to gave up of r' -e 'end try' \
-    -e 'if g then error number -128' -e 'return text returned of r' \
-    </dev/null 2>/dev/null
+  local mode=--input
+  [ "$3" = secure ] && mode=--secure
+  noc_ui --message "$1" --style "${5:-note}" "$mode" --default "$2" \
+    --button "${6:-$L_BTN_OK}" --button "$L_BTN_CANCEL" ${4:+--timeout "$4"}
 }
 
-# noc_notify MESSAGE [TITLE]
-noc_notify() {
-  NOC_MSG="$1" NOC_TITLE="${2:-$APP_NAME}" osascript \
-    -e 'display notification (do shell script "printenv NOC_MSG") with title (do shell script "printenv NOC_TITLE")' \
-    </dev/null >/dev/null 2>&1
-}
-
-# --- Locks ------------------------------------------------------------------------
-# noc_lock DIR NAME-IN-COMMAND: take a lock directory. A lock is only treated as stale
-# when its owner is gone; a lock without a pid yet is stale only after 30 seconds
-# (closes the gap between creating the directory and writing the pid).
-noc_lock() {
-  local dir="$1" pattern="$2" holder age
-  mkdir "$dir" 2>/dev/null && { echo $$ > "$dir/pid"; return 0; }
-  holder="$(cat "$dir/pid" 2>/dev/null)"
-  if [ -n "$holder" ]; then
-    ps -p "$holder" -o command= 2>/dev/null | grep -q "$pattern" && return 1
-  else
-    age=$(( $(date +%s) - $(stat -f %m "$dir" 2>/dev/null || echo 0) ))
-    [ "$age" -lt 30 ] && return 1
+# Progress window (installer): noc_status TEXT starts or updates it, noc_status_done closes it.
+noc_status() {
+  printf '%s\n' "$1" > "$D/status.tmp" && mv -f "$D/status.tmp" "$D/status"
+  if [ -z "${NOC_PROGRESS_STARTED:-}" ]; then
+    NOC_PROGRESS_STARTED=1
+    "$(noc_ui_bin)" progress --title "$APP_NAME" --status-file "$D/status" </dev/null >/dev/null 2>&1 &
   fi
-  rm -rf "$dir"
-  mkdir "$dir" 2>/dev/null && { echo $$ > "$dir/pid"; return 0; }
-  return 1
 }
+noc_status_done() { rm -f "$D/status"; }
 
-# --- Text helpers ---------------------------------------------------------------
+# --- Text helpers -----------------------------------------------------------------------
 noc_enc() { printf '%s' "$1" | perl -pe 's/([^A-Za-z0-9._~-])/sprintf("%%%02X",ord($1))/ge'; }
 noc_nfc() { printf '%s' "$1" | perl -CS -MUnicode::Normalize -pe '$_ = NFC($_)'; }
 noc_xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
@@ -89,8 +83,30 @@ noc_keychain_account() {
     if (/"acct"<blob>=0x([0-9A-Fa-f]+)/) { print pack("H*", $1); exit }
     if (/"acct"<blob>="(.*)"\s*$/)      { print $1; exit }'
 }
+# Writes the stored password to stdout (for a pipe), or fails.
+noc_password() { security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$1" -w 2>/dev/null; }
+# Reads a password from stdin and stores it.
+noc_save_password() { "$APP/bin/nas-on-click" keychain-set --service "$KEYCHAIN_SERVICE" --account "$1" --label "$APP_NAME"; }
 
-# --- Where are we? -----------------------------------------------------------------
+# The share list returned by `smbutil view`, without names that could act as a path.
+noc_parse_shares() {
+  NOC_EXCLUDE="$EXCLUDE_SHARES" perl -CSD -ne '
+    BEGIN { %x = map { $_ => 1 } (split(" ", $ENV{NOC_EXCLUDE}), q{IPC$}) }
+    next unless /^(.+?)\s+Disk(\s|$)/;
+    my $n = $1;
+    next if $n =~ m{/} || $n =~ /\.\./ || $n =~ /^\./ || $x{$n};
+    print "$n\n";'
+}
+
+# Trimmed, NFC; upper case when USERNAME_UPPERCASE=yes (dotless i, U+0131, stays lower).
+noc_normalize_user() {
+  NOC_UC="$USERNAME_UPPERCASE" perl -CSD -MUnicode::Normalize -e '
+    local $/; my $t = NFC(scalar <STDIN> // ""); $t =~ s/^\s+|\s+$//g;
+    if ($ENV{NOC_UC} eq "yes") { $t =~ s/\x{131}/\x{1}/g; $t = uc $t; $t =~ s/\x{1}/\x{131}/g }
+    print $t' <<< "$1"
+}
+
+# --- Where are we? -------------------------------------------------------------------------
 noc_has_office() { [ -n "$OFFICE_HOST" ]; }
 noc_has_remote() { [ -n "$REMOTE_HOST" ]; }
 
@@ -98,17 +114,20 @@ noc_on_office_subnet() {
   noc_has_office && ifconfig 2>/dev/null | grep -qF "inet $OFFICE_SUBNET_PREFIX"
 }
 
-# True only when the default gateway is the office router: same address, same MAC
-# (from the ARP cache, so no packets are sent and no Local Network prompt appears).
-noc_in_office() {
+# yes | no | unknown. "yes" needs the default gateway's address, its MAC address from
+# the ARP cache (read only: no packets, no Local Network prompt) and the subnet.
+# "unknown" = everything matches but there is no ARP entry yet (or it expired);
+# an "(incomplete)" entry means the router did not answer: "no".
+noc_office_state() {
   local gw mac
-  noc_has_office || return 1
+  noc_has_office || { echo no; return; }
   gw="$(route -n get default 2>/dev/null | awk '/gateway:/ { print $2; exit }')"
-  [ "$gw" = "$OFFICE_GATEWAY" ] || return 1
-  noc_on_office_subnet || return 1
+  [ "$gw" = "$OFFICE_GATEWAY" ] && noc_on_office_subnet || { echo no; return; }
   mac="$(arp -n "$OFFICE_GATEWAY" 2>/dev/null | awk '{ print $4; exit }')"
-  [ -n "$mac" ] && [ "$(noc_norm_mac "$mac")" = "$OFFICE_GATEWAY_MAC" ]
+  case "$mac" in '') echo unknown; return ;; '(incomplete)') echo no; return ;; esac
+  if [ "$(noc_norm_mac "$mac")" = "$OFFICE_GATEWAY_MAC" ]; then echo yes; else echo no; fi
 }
+noc_in_office() { [ "$(noc_office_state)" = yes ]; }
 
 noc_warp_org() {
   [ -x "$WARP_CLI" ] || return 1
@@ -118,13 +137,21 @@ noc_warp_enrolled()  { noc_has_remote && [ "$(noc_warp_org)" = "$WARP_TEAM" ]; }
 noc_warp_connected() { noc_warp_enrolled && "$WARP_CLI" --accept-tos status 2>/dev/null | grep -q "Connected"; }
 noc_remote_ok()      { noc_warp_connected && nc -z -G 4 "$REMOTE_HOST" 445 2>/dev/null; }
 
-# Is the given NAS address usable from where the Mac is right now?
-noc_reachable() {
-  if [ "$1" = "$OFFICE_HOST" ]; then noc_in_office; else noc_remote_ok; fi
+# Route for a new mount: WARP first (the office values are not secret, see README).
+noc_pick_host() {
+  if noc_remote_ok; then echo "$REMOTE_HOST"
+  elif noc_in_office; then echo "$OFFICE_HOST"
+  else return 1; fi
 }
 
-# --- Mounted shares ---------------------------------------------------------------
-# This user's SMB mounts of the NAS, one per line: address<TAB>mount point<TAB>share name (NFC)
+# Should an existing mount of ADDRESS be kept? An expired ARP entry is not a reason
+# to drop an office mount.
+noc_still_reachable() {
+  if [ "$1" = "$OFFICE_HOST" ]; then [ "$(noc_office_state)" != no ]; else noc_remote_ok; fi
+}
+
+# --- Mounted shares ------------------------------------------------------------------------
+# This user's SMB mounts of the NAS, one per line: address<TAB>mount point<TAB>share (NFC)
 noc_mounts() {
   mount | grep -F "mounted by $ME)" | NOC_HOSTS="$OFFICE_HOST $REMOTE_HOST" perl -MUnicode::Normalize -ne '
     BEGIN { binmode STDOUT, ":utf8"; %h = map { $_ => 1 } split " ", $ENV{NOC_HOSTS} }

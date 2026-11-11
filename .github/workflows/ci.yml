@@ -16,7 +16,22 @@ jobs:
         with:
           persist-credentials: false
       - name: ShellCheck
-        run: shellcheck -x -S warning src/*.sh src/lib/*.sh src/lang/*.sh tools/*.sh tools/hooks/pre-push tests/run.sh
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        env:
+          SHELLCHECK_OPTS: -x
+        with:
+          severity: warning
+          additional_files: tools/hooks/pre-push
+
+  leak-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Addresses, e-mail addresses and key material in files and history
+        run: tools/leak-scan.sh
 
   test:
     runs-on: macos-latest
@@ -24,7 +39,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build helpers
+      - name: Build
         run: tools/build.sh
-      - name: Tests
+      - name: Config, signature and update tests
         run: tests/run.sh
+      - name: Agent, installer and uninstaller tests
+        run: tests/agent.sh

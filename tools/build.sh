@@ -7,10 +7,13 @@ OUT="$ROOT/dist/payload"
 BUILD="$ROOT/dist/build"
 rm -rf "$OUT" "$BUILD"
 mkdir -p "$OUT/bin" "$BUILD"
-for helper in opener sleepwatch; do
-  for arch in arm64 x86_64; do
-    swiftc -O -target "$arch-apple-macos12.0" -o "$BUILD/$helper-$arch" "$ROOT/src/helpers/$helper.swift"
-  done
+# nas-on-click: launchers, setup app, dialogs, mounting, Keychain, update checks.
+# sleepwatch: the sleep watcher (kept separate: it runs all the time).
+for arch in arm64 x86_64; do
+  swiftc -O -target "$arch-apple-macos12.0" -o "$BUILD/nas-on-click-$arch" "$ROOT"/src/app/*.swift
+  swiftc -O -target "$arch-apple-macos12.0" -o "$BUILD/sleepwatch-$arch" "$ROOT/src/helpers/sleepwatch.swift"
+done
+for helper in nas-on-click sleepwatch; do
   lipo -create -output "$OUT/bin/$helper" "$BUILD/$helper-arm64" "$BUILD/$helper-x86_64"
   codesign --force -s - "$OUT/bin/$helper"
 done

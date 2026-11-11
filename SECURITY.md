@@ -20,7 +20,8 @@ Of most interest:
 - config or share names that lead to command execution or to files outside the
   data folder being written or deleted.
 
-Known limitations are listed under "Security model" in the README.
+The threat model and known limitations are in [ARCHITECTURE.md](ARCHITECTURE.md#threat-model)
+and under "Security model" in the README.
 
 ## Supported versions
 

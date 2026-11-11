@@ -12,7 +12,7 @@ noc_load_lang "$HERE" || exit 1
 
 # Unmount first: if something stays mounted, the jobs keep running and nothing changes.
 while IFS=$'\t' read -r _ mp _; do
-  [ -n "$mp" ] && perl -e 'alarm 20; exec @ARGV' /usr/sbin/diskutil unmount "$mp" >/dev/null 2>&1
+  [ -n "$mp" ] && noc_timeout 20 "$DISKUTIL" unmount "$mp" >/dev/null 2>&1
 done < <(noc_mounts)
 if [ -n "$(noc_mounts)" ]; then
   echo "Some NAS folders could not be unmounted because files are open. Close them and run this again. Nothing was deleted."

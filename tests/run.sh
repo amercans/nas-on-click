@@ -4,7 +4,7 @@
 # temporary HOME; nothing on the machine is changed and nothing is downloaded.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OPENER="$ROOT/dist/payload/bin/opener"
+OPENER="$ROOT/dist/payload/bin/nas-on-click"
 [ -x "$OPENER" ] || { echo "build first: tools/build.sh"; exit 1; }
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -41,7 +41,7 @@ manifest() { # product version file sha size
   printf '{"product":"%s","version":"%s","file":"%s","sha256":"%s","size":%s,"notes":"line one\\nline\\ttwo"}' "$@" > "$WORK/m.json"
   "${SIGNER[@]}" sign "$WORK/m.json" > "$WORK/m.sig"
 }
-verify() { "$OPENER" --verify-manifest "$WORK/m.json" "$WORK/m.sig" "$WORK/keys" nas-on-click "$1" >"$WORK/out" 2>/dev/null; echo $?; }
+verify() { "$OPENER" verify-manifest "$WORK/m.json" "$WORK/m.sig" "$WORK/keys" nas-on-click "$1" >"$WORK/out" 2>/dev/null; echo $?; }
 
 manifest nas-on-click 1.2.0 nas-on-click-1.2.0.tar.gz "$SHA0" 1000
 check "newer version accepted"         [ "$(verify 1.1.9)" = 0 ]
@@ -76,7 +76,7 @@ LANGUAGE=en
 noc_load_lang "$ROOT/src"
 . "$ROOT/src/lib/common.sh"
 . "$ROOT/src/lib/update.sh"
-mkdir -p "$APP/bin"; cp "$OPENER" "$APP/bin/opener"; cp "$WORK/keys" "$APP/update-keys"; echo 1.0.0 > "$APP/VERSION"
+mkdir -p "$APP/bin"; cp "$OPENER" "$APP/bin/nas-on-click"; cp "$WORK/keys" "$APP/update-keys"; echo 1.0.0 > "$APP/VERSION"
 : > "$D/config"
 SERVER="$WORK/server"
 # A fake package whose installer only leaves a marker.
@@ -90,7 +90,7 @@ publish() { # version
 # Stubs: local files instead of the network, scripted answers instead of dialogs.
 noc_fetch() { cp "$SERVER/${1##*/}" "$2" 2>/dev/null; }
 ANSWER=""; noc_choose() { printf '%s' "$ANSWER"; }
-noc_notify() { :; }
+noc_alert() { :; }
 run_update() { rm -f "$WORK/installed" "$D/last-update-check"; noc_update_check; }
 
 publish 1.1.0
