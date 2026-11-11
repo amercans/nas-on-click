@@ -1,7 +1,9 @@
 #!/bin/bash
 # Publishes a signed release (maintainer only).
 #
-#   tools/release.sh VERSION "short release note"
+#   tools/release.sh VERSION "short release note" [--resume]
+#
+# --resume continues after an interruption, once the tag is already on GitHub.
 #
 # 1. Sets VERSION, commits and pushes a tag.
 # 2. GitHub Actions (.github/workflows/release.yml) builds the package from that tag,
@@ -13,7 +15,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-VER="${1:-}"; NOTES="${2:-}"
+VER="${1:-}"; NOTES="${2:-}"; RESUME="${3:-}"
 REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 die() { echo "release: $*" >&2; exit 1; }
 
@@ -21,16 +23,22 @@ die() { echo "release: $*" >&2; exit 1; }
 [ -n "$NOTES" ] || die "a short release note is required"
 [ "$(git branch --show-current)" = main ] || die "release from main"
 git diff --quiet && git diff --cached --quiet || die "commit your changes first"
-git rev-parse -q --verify "refs/tags/v$VER" >/dev/null && die "tag v$VER already exists"
 grep -q "^## \[$VER\]" CHANGELOG.md || die "add a '## [$VER]' section to CHANGELOG.md"
-"$ROOT/tools/leak-scan.sh"
 
-# A local build supplies the verifier used below (the same code installed copies run).
-echo "$VER" > VERSION
-"$ROOT/tools/build.sh" >/dev/null
-if ! git diff --quiet VERSION; then git add VERSION; git commit -m "Release $VER"; fi
-git tag -a "v$VER" -m "$VER"
-git push origin main "v$VER"
+if [ "$RESUME" = --resume ]; then
+  git rev-parse -q --verify "refs/tags/v$VER" >/dev/null || die "no tag v$VER to resume"
+  [ "$(cat VERSION)" = "$VER" ] || die "VERSION is not $VER"
+  "$ROOT/tools/build.sh" >/dev/null
+else
+  git rev-parse -q --verify "refs/tags/v$VER" >/dev/null && die "tag v$VER already exists (use --resume)"
+  "$ROOT/tools/leak-scan.sh"
+  # A local build supplies the verifier used below (the same code installed copies run).
+  echo "$VER" > VERSION
+  "$ROOT/tools/build.sh" >/dev/null
+  if ! git diff --quiet VERSION; then git add VERSION; git commit -m "Release $VER"; fi
+  git tag -a "v$VER" -m "$VER"
+  git push origin main "v$VER"
+fi
 COMMIT="$(git rev-parse "v$VER^{commit}")"
 [ "$(git ls-remote origin "refs/tags/v$VER^{}" | awk '{ print $1 }')" = "$COMMIT" ] || die "the tag on GitHub does not point at $COMMIT"
 
@@ -38,7 +46,14 @@ echo "Waiting for the release build on GitHub..."
 sleep 10
 RUN="$(gh run list --repo "$REPO" --workflow release.yml --branch "v$VER" --limit 1 --json databaseId --jq '.[0].databaseId')"
 [ -n "$RUN" ] || die "release build not found"
-gh run watch "$RUN" --repo "$REPO" --exit-status >/dev/null || die "release build failed: gh run view $RUN --log-failed"
+while :; do
+  STATE="$(gh run view "$RUN" --repo "$REPO" --json status,conclusion --jq '.status + " " + (.conclusion // "")')"
+  case "$STATE" in
+    "completed success") break ;;
+    completed*) die "release build failed: gh run view $RUN --repo $REPO --log-failed" ;;
+  esac
+  sleep 10
+done
 
 OUT="$ROOT/dist/release"
 rm -rf "$OUT"; mkdir -p "$OUT"
