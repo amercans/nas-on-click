@@ -1,0 +1,71 @@
+# nas-on-click deployment config
+#
+# Copy this file, fill in your own values and pass it to tools/make-package.sh.
+# Format: KEY=value, one per line. Lines starting with # are ignored.
+# The file is parsed, never executed. Unknown keys are rejected.
+# Values may not contain the characters  "  \  %  $  `  or a newline.
+# The example addresses below are documentation ranges (RFC 5737) - replace them.
+
+# --- Identity --------------------------------------------------------------
+# Name shown in dialog titles and notifications.
+APP_NAME=NAS
+# Name of your organisation, used in a few messages (defaults to APP_NAME).
+ORG_NAME=Example Co
+# Who users should contact when something goes wrong.
+# Leave empty to use the language default ("your administrator").
+SUPPORT_CONTACT=
+# UI language: en or tr
+LANGUAGE=en
+
+# --- Local layout on each Mac ---------------------------------------------
+# Hidden folder in the user's home that holds scripts, state and logs.
+DATA_DIR=.nas-on-click
+# Reverse-DNS prefix for the background jobs and the folder launchers.
+BUNDLE_ID=com.example.nas-on-click
+# Folder (in the home folder, linked on the Desktop) that holds one icon per share.
+FOLDER_NAME=NAS Drive
+# Keychain item name for the NAS password.
+KEYCHAIN_SERVICE=nas-on-click
+
+# --- Office network (direct SMB) -------------------------------------------
+# The NAS address inside the office.
+OFFICE_HOST=192.0.2.10
+# The office router. The network counts as "the office" only when the default
+# gateway has this address AND this MAC address (read from the ARP cache) and the
+# Mac has an address in OFFICE_SUBNET_PREFIX. These values are not secret: anyone
+# holding the installer can imitate them, so when WARP is configured and connected
+# the tunnel is always preferred and the direct route is only a fallback.
+OFFICE_GATEWAY=192.0.2.1
+OFFICE_GATEWAY_MAC=00:00:5e:00:53:01
+# Address prefix the Mac gets on the office network.
+OFFICE_SUBNET_PREFIX=192.0.2.
+
+# --- Remote access through Cloudflare WARP (optional) ----------------------
+# Leave both empty for office-only use.
+# The NAS address as seen through the Cloudflare tunnel. Must differ from OFFICE_HOST.
+REMOTE_HOST=198.51.100.20
+# Your Cloudflare Zero Trust team name.
+WARP_TEAM=example-team
+# How users sign in to WARP, shown in messages, e.g. "Google (@example.com)".
+LOGIN_ACCOUNT=Google (@example.com)
+
+# --- Shares ------------------------------------------------------------------
+# Space-separated share names that never get an icon.
+EXCLUDE_SHARES=docker homes
+# Some NAS setups only accept user names with non-ASCII letters in upper case.
+# yes = convert the user name to upper case before signing in.
+USERNAME_UPPERCASE=no
+
+# --- Updates -----------------------------------------------------------------
+# Where signed releases are published. Leave empty to disable update checks.
+# Only releases signed with a key in keys/update-keys.txt are ever installed.
+UPDATE_URL=https://github.com/amercans/nas-on-click/releases/latest/download
+
+# --- Installer -----------------------------------------------------------------
+# Name of the installer app built by tools/make-package.sh.
+INSTALLER_NAME=NAS Setup
+
+# --- Migration from an older in-house setup (optional) ---------------------
+# Background job labels to unload, and launcher bundle-id prefixes to remove.
+LEGACY_LABELS=
+LEGACY_BUNDLE_PREFIXES=

@@ -1,0 +1,6 @@
+dist/
+*.conf
+*.cfg
+/config
+!config.example
+.DS_Store
