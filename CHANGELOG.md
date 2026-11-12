@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-12
+
+### Fixed
+- Dead mounts are force-closed with `unmount(2)` (new `nas-on-click unmount` command)
+  instead of `diskutil`, which goes through Disk Arbitration and blocked for its whole
+  20-second timeout on a server that was gone, so macOS showed its "server connections
+  interrupted" dialog first. `diskutil` remains the fallback.
+
 ## [1.2.2] - 2026-11-12
 
 ### Fixed

@@ -68,6 +68,7 @@ case "$cmd" in
     fi
     exit "$rc" ;;
   ui) echo "$*" >> "$WORK/ui.log"; [ -n "$FX_UI_ANSWER" ] && echo "$FX_UI_ANSWER"; exit "$FX_UI_RC" ;;
+  unmount) echo "$*" >> "$WORK/force.log"; [ "${FX_APP_UNMOUNT:-0}" = 0 ] || exit 1; exec "$WORK/shim/diskutil" unmount force "$1" ;;
   progress) exit 0 ;;
   hide-extension) exit 0 ;;
   verify-manifest) exec "'"$ROOT"'/dist/payload/bin/nas-on-click" verify-manifest "$@" ;;
@@ -215,6 +216,13 @@ echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid
 export FX_GW=198.51.100.1 FX_IP=""
 cleanup
 check "Wi-Fi off, WARP tunnel still up: treated as offline" [ "$(head -1 "$WORK/diskutil.log")" = "unmount force /Volumes/Projects" ]
+check "dead mounts are closed with unmount(2), not Disk Arbitration" [ "$(cat "$WORK/force.log")" = "/Volumes/Projects" ]
+reset
+echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
+export FX_GW="" FX_IP="" FX_APP_UNMOUNT=1
+cleanup
+check "diskutil is the fallback when unmount(2) fails" [ "$(cat "$WORK/diskutil.log")" = "unmount force /Volumes/Projects" ]
+export FX_APP_UNMOUNT=0
 
 echo "locks"
 reset

@@ -4,6 +4,11 @@
 //       Reads the password from stdin and mounts with NetFS, with all system UI
 //       disabled (no login dialog, no "remember in Keychain"). Prints the mount point.
 //       Exit 0 mounted, 77 authentication rejected, 1 other failure.
+//
+//   nas-on-click unmount PATH
+//       Force-unmounts PATH with unmount(2). Unlike diskutil, it does not go through Disk
+//       Arbitration, which can block for a long time on a server that is gone.
+//       Exit 0 unmounted, 1 failure.
 
 import Foundation
 import NetFS
@@ -47,6 +52,13 @@ enum Mount {
     FileHandle.standardError.write("mount failed: \(rc)\n".data(using: .utf8)!)
     // EAUTH: the server rejected the user name or password.
     if rc == EAUTH { return authFailed }
+    return 1
+  }
+
+  static func forceUnmount(_ a: [String]) -> Int32 {
+    guard a.count == 1, a[0].hasPrefix("/Volumes/") else { return 64 }
+    if Darwin.unmount(a[0], MNT_FORCE) == 0 { return 0 }
+    FileHandle.standardError.write("unmount failed: \(errno)\n".data(using: .utf8)!)
     return 1
   }
 }

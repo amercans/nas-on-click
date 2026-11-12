@@ -39,7 +39,10 @@ close_mount() {
   # every mount is: force it at once, before macOS shows its "server connections
   # interrupted" dialog.
   if { [ "$addr" = "$OFFICE_HOST" ] && ! noc_on_office_subnet; } || noc_offline; then
-    if noc_timeout 20 "$DISKUTIL" unmount force "$mp" >/dev/null 2>&1; then
+    # unmount(2) directly: diskutil goes through Disk Arbitration, which blocks for a long
+    # time on a server that is gone.
+    if noc_timeout 10 "$APP/bin/nas-on-click" unmount "$mp" >/dev/null 2>&1 \
+      || noc_timeout 20 "$DISKUTIL" unmount force "$mp" >/dev/null 2>&1; then
       noc_log "$why: unmounted (off the office network) $mp"; return 0
     fi
     noc_log "$why: could not unmount (no reply) $mp"; return 1
