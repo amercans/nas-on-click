@@ -6,6 +6,18 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-12
+
+### Changed
+- When the setup app is opened on a Mac where it is already installed, it offers Update
+  (newer package), Reinstall (same version) or only Uninstall (older package, so it
+  never downgrades) instead of a generic "Repair".
+
+### Fixed
+- With no network at all (Wi-Fi off, cable out), every mount, including WARP mounts, is
+  force-unmounted after a 5-second grace period, before macOS shows its "server
+  connections interrupted" dialog.
+
 ## [1.2.0] - 2026-11-12
 
 ### Added

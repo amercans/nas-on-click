@@ -63,21 +63,34 @@ $L_FAILED_TAIL" stop
   rm -f "$D/install-error"
 }
 
-# --- Already installed: repair or uninstall ------------------------------------------
+# --- Already installed: update, reinstall or uninstall --------------------------------
+# 0 when version $1 is newer than $2 (MAJOR.MINOR.PATCH)
+version_newer() {
+  awk -v a="$1" -v b="$2" 'BEGIN { split(a, x, "."); split(b, y, ".");
+    for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 1 }'
+}
+uninstall_now() {
+  [ "$(noc_choose "$L_UNINSTALL_CONFIRM" "$L_BTN_UNINSTALL" "$L_BTN_CANCEL" "" caution)" = "$L_BTN_UNINSTALL" ] || exit 0
+  if /bin/bash "$APP/uninstall.sh" >/dev/null 2>&1; then noc_alert "$L_UNINSTALL_DONE" note
+  else noc_alert "$L_UNINSTALL_BUSY" caution; fi
+  exit 0
+}
 if [ $MODE = install ] && [ -z "${NOC_SKIP_INTRO:-}" ] && [ -f "$D/config" ] && [ -x "$APP/uninstall.sh" ]; then
-  choice="$(noc_ui --message "$L_INSTALLED_CHOICE" --style note \
-    --button "$L_BTN_REPAIR" --button "$L_BTN_UNINSTALL" --button "$L_BTN_CANCEL")"
-  if [ "$choice" = "$L_BTN_UNINSTALL" ]; then
-    [ "$(noc_choose "$L_UNINSTALL_CONFIRM" "$L_BTN_UNINSTALL" "$L_BTN_CANCEL" "" caution)" = "$L_BTN_UNINSTALL" ] || exit 0
-    if /bin/bash "$APP/uninstall.sh" >/dev/null 2>&1; then
-      noc_alert "$L_UNINSTALL_DONE" note
-    else
-      noc_alert "$L_UNINSTALL_BUSY" caution
-    fi
+  have="$(cat "$APP/VERSION" 2>/dev/null)"; here="$(cat "$HERE/VERSION" 2>/dev/null)"
+  if version_newer "$have" "$here"; then
+    # Never downgrade from here.
+    [ "$(noc_choose "$(noc_fmt "$L_INSTALLED_NEWER" "$have" "$here")" "$L_BTN_CANCEL" "$L_BTN_UNINSTALL" "" caution)" = "$L_BTN_UNINSTALL" ] && uninstall_now
     exit 0
   fi
-  [ "$choice" = "$L_BTN_REPAIR" ] || exit 0
-  NOC_SKIP_INTRO=1   # repairing: no welcome screen
+  if version_newer "$here" "$have"; then
+    message="$(noc_fmt "$L_INSTALLED_UPDATE" "$have" "$here")"; again="$L_BTN_UPDATE"
+  else
+    message="$(noc_fmt "$L_INSTALLED_SAME" "$have")"; again="$L_BTN_REINSTALL"
+  fi
+  choice="$(noc_ui --message "$message" --style note --button "$again" --button "$L_BTN_UNINSTALL" --button "$L_BTN_CANCEL")"
+  [ "$choice" = "$L_BTN_UNINSTALL" ] && uninstall_now
+  [ "$choice" = "$again" ] || exit 0
+  NOC_SKIP_INTRO=1   # updating or reinstalling: no welcome screen
 fi
 
 # --- Welcome -----------------------------------------------------------------------

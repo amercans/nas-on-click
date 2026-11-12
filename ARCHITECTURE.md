@@ -55,7 +55,7 @@ commands:
 ## Invariants
 
 - Nothing is mounted unless the user clicked within the last three minutes.
-- A share is force-unmounted only if it is mounted from the office address and the Mac has no address on the office subnet. Mounts through WARP are never forced, and neither is any unmount before sleep.
+- A share is force-unmounted only when its route cannot come back soon: it is mounted from the office address and the Mac has no address on the office subnet, or the Mac has no network at all (both after a 5-second grace period). A WARP mount is never forced while the Mac is online, and no unmount before sleep is ever forced.
 - A password the NAS rejected is never sent again. The user is asked for a new one, so the NAS auto-block cannot lock the account through repeated retries. The stored password counts as rejected on an authentication error, and also after two failed mounts in a row whatever the error code, so a server that reports rejection differently still cannot cause a stream of retries. A new password is stored only after the NAS accepted it.
 - The NAS password never appears in a process's arguments or environment. It only passes through pipes: Keychain → `security -g` → stdin of the helper or of the expect script.
 - Uninstall deletes nothing while a share is still mounted. Every `rm -r` uses `-x`, so it never crosses into another file system.

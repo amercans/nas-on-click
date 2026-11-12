@@ -26,7 +26,7 @@ export FX_UNMOUNT=0 FX_UI_ANSWER="" FX_UI_RC=0 FX_MOUNT_RCS=""
 export WORK ME
 mk() { printf '#!/bin/bash\n%s\n' "$2" > "$SHIM/$1"; chmod +x "$SHIM/$1"; }
 mk mount     'cat "$WORK/mounts" 2>/dev/null'
-mk route     'echo "   gateway: $FX_GW"'
+mk route     '[ -n "$FX_GW" ] || exit 1; echo "   gateway: $FX_GW"'
 mk ifconfig  'echo "	inet $FX_IP netmask 0xffffff00"'
 mk arp       'case "$FX_MAC" in "") ;; incomplete) echo "? ($2) at (incomplete) on en0" ;; *) echo "? ($2) at $FX_MAC on en0 ifscope [ethernet]" ;; esac'
 mk nc        'exit $FX_NC'
@@ -203,7 +203,12 @@ reset
 echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
 export FX_UNMOUNT=1
 cleanup
-refute "remote mount is never forced" has "$WORK/diskutil.log" "force"
+refute "remote mount is never forced while online" has "$WORK/diskutil.log" "force"
+reset
+echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
+export FX_GW="" FX_IP=""
+cleanup
+check "no network at all: WARP mount forced after 5 s" [ "$(head -1 "$WORK/diskutil.log")" = "unmount force /Volumes/Projects" ]
 
 echo "locks"
 reset
@@ -248,7 +253,7 @@ cp -R "$HOME/NAS Drive" "$WORK/launchers.bak"
 printf '%s\n' "$APPBIN" > "$APP/Helper.app/Contents/MacOS/nas-on-click"
 export FX_UI_ANSWER=Uninstall
 LANGUAGE=en /bin/bash "$PKGDIR/install.sh" >/dev/null 2>&1
-check "setup app: repair-or-uninstall offered"   grep -q "already installed" "$WORK/ui.log"
+check "setup app: reinstall-or-uninstall offered" grep -q "already installed" "$WORK/ui.log"
 check "setup app: uninstall removes everything"  [ ! -d "$D" ] && [ ! -e "$HOME/NAS Drive" ]
 export FX_UI_ANSWER=""
 

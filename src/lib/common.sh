@@ -136,6 +136,8 @@ noc_normalize_user() {
 
 # --- Where are we? -------------------------------------------------------------------------
 noc_has_office() { [ -n "$OFFICE_HOST" ]; }
+# No default route at all: Wi-Fi off, cable out, airplane mode.
+noc_offline() { ! route -n get default >/dev/null 2>&1; }
 noc_has_remote() { [ -n "$REMOTE_HOST" ]; }
 
 noc_on_office_subnet() {

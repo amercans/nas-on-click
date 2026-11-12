@@ -35,9 +35,10 @@ sleep_unmount() {
 # is certainly off the office network (it cannot come back); remote mounts never are.
 close_mount() {
   local addr="$1" mp="$2" why="$3"
-  # Off the office network an office mount is dead for good: force it at once, before
-  # macOS has time to show its "server connections interrupted" dialog.
-  if [ "$addr" = "$OFFICE_HOST" ] && ! noc_on_office_subnet; then
+  # Off the office network an office mount is dead for good, and with no network at all
+  # every mount is: force it at once, before macOS shows its "server connections
+  # interrupted" dialog.
+  if { [ "$addr" = "$OFFICE_HOST" ] && ! noc_on_office_subnet; } || noc_offline; then
     if noc_timeout 20 "$DISKUTIL" unmount force "$mp" >/dev/null 2>&1; then
       noc_log "$why: unmounted (off the office network) $mp"; return 0
     fi
@@ -56,9 +57,15 @@ cleanup() {
   local a mp bad=0
   while IFS=$'\t' read -r a mp _; do noc_still_reachable "$a" || { bad=1; break; }; done < <(noc_mounts)
   [ $bad = 1 ] || return 0
-  # Office mounts with the Mac off the office network cannot come back: close them
-  # quickly (after 5 s, so a short Wi-Fi blip does not cut an open file).
-  if [ -n "$(noc_mounts | awk -F'\t' -v h="$OFFICE_HOST" '$1 == h')" ] && ! noc_on_office_subnet; then wait_serving 5; fi
+  # No network at all, or office mounts with the Mac off the office network: these
+  # cannot come back soon, so close them quickly (after 5 s, so a short blip does not
+  # cut an open file) instead of waiting for macOS to complain.
+  if noc_offline || { [ -n "$(noc_mounts | awk -F'\t' -v h="$OFFICE_HOST" '$1 == h')" ] && ! noc_on_office_subnet; }; then
+    wait_serving 5
+  fi
+  if noc_offline; then
+    while IFS=$'\t' read -r a mp _; do close_mount "$a" "$mp" "no network"; done < <(noc_mounts)
+  fi
   while IFS=$'\t' read -r a mp _; do
     [ "$a" = "$OFFICE_HOST" ] && ! noc_on_office_subnet && close_mount "$a" "$mp" "left the office network"
   done < <(noc_mounts)
