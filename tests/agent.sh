@@ -27,7 +27,8 @@ export WORK ME
 mk() { printf '#!/bin/bash\n%s\n' "$2" > "$SHIM/$1"; chmod +x "$SHIM/$1"; }
 mk mount     'cat "$WORK/mounts" 2>/dev/null'
 mk route     '[ -n "$FX_GW" ] || exit 1; echo "   gateway: $FX_GW"'
-mk ifconfig  'echo "	inet $FX_IP netmask 0xffffff00"'
+mk ifconfig  'echo "en0: flags=8863<UP> mtu 1500"; [ -n "$FX_IP" ] && echo "	inet $FX_IP netmask 0xffffff00"
+echo "utun4: flags=8051<UP> mtu 1280"; echo "	inet 198.51.100.7 --> 198.51.100.7 netmask 0xffffffff"; exit 0'
 mk arp       'case "$FX_MAC" in "") ;; incomplete) echo "? ($2) at (incomplete) on en0" ;; *) echo "? ($2) at $FX_MAC on en0 ifscope [ethernet]" ;; esac'
 mk nc        'exit $FX_NC'
 mk open      'echo "$*" >> "$WORK/open.log"'
@@ -209,6 +210,11 @@ echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid
 export FX_GW="" FX_IP=""
 cleanup
 check "no network at all: WARP mount forced after 5 s" [ "$(head -1 "$WORK/diskutil.log")" = "unmount force /Volumes/Projects" ]
+reset
+echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
+export FX_GW=198.51.100.1 FX_IP=""
+cleanup
+check "Wi-Fi off, WARP tunnel still up: treated as offline" [ "$(head -1 "$WORK/diskutil.log")" = "unmount force /Volumes/Projects" ]
 
 echo "locks"
 reset

@@ -137,7 +137,15 @@ noc_normalize_user() {
 # --- Where are we? -------------------------------------------------------------------------
 noc_has_office() { [ -n "$OFFICE_HOST" ]; }
 # No default route at all: Wi-Fi off, cable out, airplane mode.
-noc_offline() { ! route -n get default >/dev/null 2>&1; }
+# Offline = no default route, or no IPv4 address on a real network interface. The second
+# check matters with WARP: its tunnel keeps a default route after Wi-Fi is turned off.
+noc_offline() {
+  route -n get default >/dev/null 2>&1 || return 0
+  ifconfig 2>/dev/null | awk '
+    /^[a-z]/ { ifc = $1; sub(/:$/, "", ifc) }
+    $1 == "inet" && ifc !~ /^(lo|utun|ipsec|gif|stf|bridge|awdl|llw|anpi|ap)[0-9]*$/ && $2 !~ /^(127|169\.254)\./ { up = 1 }
+    END { exit up }'
+}
 noc_has_remote() { [ -n "$REMOTE_HOST" ]; }
 
 noc_on_office_subnet() {

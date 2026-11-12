@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-12
+
+### Fixed
+- The Mac now counts as offline when no real network interface has an address, even if
+  the Cloudflare WARP tunnel still holds a default route (it does after Wi-Fi is turned
+  off). Before, mounts were not closed in time and macOS showed its "server connections
+  interrupted" dialog.
+
 ## [1.2.1] - 2026-11-12
 
 ### Changed
