@@ -145,8 +145,7 @@ nas_account() {
     noc_status "$L_STATUS_ACCOUNT"
     list="$(printf '%s\n' "$pass" | list_shares "$host" "$user")"; rc=$?
     if [ $rc = 0 ] && [ -n "$list" ]; then
-      printf '%s\n' "$pass" | "$STAGE/bin/nas-on-click" keychain-set --service "$KEYCHAIN_SERVICE" --account "$user" --label "$APP_NAME" \
-        || { unset pass; fail "$L_UNEXPECTED"; }
+      printf '%s\n' "$pass" | noc_save_password "$user" || { unset pass; fail "$L_UNEXPECTED"; }
       printf '%s' "$user" > "$D/user"
       rm -f "$D/password-rejected"
       printf '%s\n' "$list" | noc_parse_shares > "$D/shares"

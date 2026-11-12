@@ -3,8 +3,8 @@
 # Expects noc_load_config and noc_load_lang to have run.
 #
 # The NAS password never appears in a process's arguments or environment: it travels
-# through pipes only (Keychain -> `security ... -w` -> stdin of the helper or of the
-# expect script).
+# through pipes only (Keychain -> `security ... -g` -> stdin of the helper or of the
+# expect script; `security -i` on stdin when it is saved).
 
 # Tools are referenced through variables so the test suite can substitute them.
 : "${WARP_CLI:=/usr/local/bin/warp-cli}"
@@ -84,9 +84,37 @@ noc_keychain_account() {
     if (/"acct"<blob>="(.*)"\s*$/)      { print $1; exit }'
 }
 # Writes the stored password to stdout (for a pipe), or fails.
-noc_password() { security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$1" -w 2>/dev/null; }
-# Reads a password from stdin and stores it.
-noc_save_password() { "$APP/bin/nas-on-click" keychain-set --service "$KEYCHAIN_SERVICE" --account "$1" --label "$APP_NAME"; }
+# `security -w` prints passwords that contain non-ASCII letters as hex, which cannot be
+# told apart from a password that is itself hex. `-g` is unambiguous: it prints
+#   password: "text"             for plain passwords, or
+#   password: 0x<HEX>  "..."     for everything else (decoded here).
+noc_password() {
+  security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$1" -g 2>&1 >/dev/null | perl -ne '
+    if (/^password: 0x([0-9A-Fa-f]+)/) { print pack("H*", $1), "\n"; $ok = 1; last }
+    if (/^password: "(.*)"$/)          { print "$1\n"; $ok = 1; last }
+    END { exit($ok ? 0 : 1) }'
+}
+# noc_save_password ACCOUNT: reads a password from stdin and stores it.
+# The item is created by /usr/bin/security itself, so later reads with `security -g`
+# never prompt. The command goes to `security -i` on stdin with the password
+# hex-encoded (-X): it never appears in arguments, and no quoting can break it.
+noc_save_password() {
+  local acct="$1" pw hex
+  case "$acct$KEYCHAIN_SERVICE$APP_NAME" in *'"'*|*'\'*|*$'\n'*) return 1 ;; esac
+  IFS= read -r pw || [ -n "$pw" ] || return 1
+  [ -n "$pw" ] || return 1
+  [ ${#pw} -le 1000 ] || return 1   # security -i reads lines of about 4 KB
+  hex="$(printf '%s' "$pw" | xxd -p | tr -d '\n')"
+  printf 'add-generic-password -U -s "%s" -a "%s" -l "%s" -X %s\n' "$KEYCHAIN_SERVICE" "$acct" "$APP_NAME" "$hex" \
+    | security -i >/dev/null 2>&1
+  local rc=${PIPESTATUS[1]}
+  unset hex
+  # Success only if security reported none and the item now holds exactly this password
+  # (an update can fail on an item whose access list does not trust security).
+  if [ "$rc" = 0 ] && [ "$(noc_password "$acct")" = "$pw" ]; then unset pw; return 0; fi
+  unset pw
+  return 1
+}
 
 # The share list returned by `smbutil view`, without names that could act as a path.
 noc_parse_shares() {

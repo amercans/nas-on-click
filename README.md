@@ -42,6 +42,7 @@ nas-on-click mounts a share only when someone asks for it. It also unmounts shar
 ```
 
 - **Never mounts by itself.** launchd also runs the agent on network changes and once a minute. Those runs only unmount shares whose route has disappeared, and they show no dialog.
+- **Leaves the office cleanly.** When the Mac drops off the office network, office mounts are force-unmounted after a 5-second grace period, before macOS shows its "server connections interrupted" dialog. A file still open on such a share loses unsaved changes, as it would anyway once the server is gone.
 - **Unmounts before sleep.** A small helper listens to IOKit power notifications, which also arrive for the sleep that follows a dark wake. Before the Mac sleeps it unmounts every share, and never forcibly. A share with an open file stays mounted.
 - **WARP first, office second.** When WARP is connected and enrolled in the team from your config, the share is always mounted through the tunnel. The direct office route is a fallback, used only when three things match:
   - the default gateway address,
@@ -132,7 +133,7 @@ Updates replace the scripts, helpers and launchers. They do not touch:
 
 ## Security model
 
-- **Credentials.** The NAS password is stored in the user's login Keychain and only ever moves through pipes: to the NetFS mount helper, to the Keychain helper, and into `smbutil`'s password prompt (through a pseudo-terminal) when setup lists the shares. It never appears in process arguments or environment variables.
+- **Credentials.** The NAS password is stored in the user's login Keychain and only ever moves through pipes: to the NetFS mount helper, into `security -i` (hex-encoded on stdin) when it is saved, and into `smbutil`'s password prompt (through a pseudo-terminal) when setup lists the shares. It never appears in process arguments or environment variables.
 - **What updates need to succeed.** An attacker needs your signing key *and* the ability to publish where `UPDATE_URL` points. Even then, nothing is installed without the user's consent. Turn on [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) for the repository.
 - **Known limitations:**
   - **Same-user access to the Keychain item.** The NAS password item trusts `/usr/bin/security`, so other programs running as the same user can read it. Pinning it to the app's own signature would need a paid Developer ID (see ARCHITECTURE.md).

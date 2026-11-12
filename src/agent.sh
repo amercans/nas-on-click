@@ -35,11 +35,15 @@ sleep_unmount() {
 # is certainly off the office network (it cannot come back); remote mounts never are.
 close_mount() {
   local addr="$1" mp="$2" why="$3"
-  if noc_timeout 20 "$DISKUTIL" unmount "$mp" >/dev/null 2>&1; then noc_log "$why: unmounted $mp"; return 0; fi
-  if [ "$addr" = "$OFFICE_HOST" ] && ! noc_on_office_subnet \
-     && noc_timeout 20 "$DISKUTIL" unmount force "$mp" >/dev/null 2>&1; then
-    noc_log "$why: unmounted (off the office network) $mp"; return 0
+  # Off the office network an office mount is dead for good: force it at once, before
+  # macOS has time to show its "server connections interrupted" dialog.
+  if [ "$addr" = "$OFFICE_HOST" ] && ! noc_on_office_subnet; then
+    if noc_timeout 20 "$DISKUTIL" unmount force "$mp" >/dev/null 2>&1; then
+      noc_log "$why: unmounted (off the office network) $mp"; return 0
+    fi
+    noc_log "$why: could not unmount (no reply) $mp"; return 1
   fi
+  if noc_timeout 20 "$DISKUTIL" unmount "$mp" >/dev/null 2>&1; then noc_log "$why: unmounted $mp"; return 0; fi
   noc_log "$why: could not unmount (open file or no reply) $mp"; return 1
 }
 
@@ -52,6 +56,13 @@ cleanup() {
   local a mp bad=0
   while IFS=$'\t' read -r a mp _; do noc_still_reachable "$a" || { bad=1; break; }; done < <(noc_mounts)
   [ $bad = 1 ] || return 0
+  # Office mounts with the Mac off the office network cannot come back: close them
+  # quickly (after 5 s, so a short Wi-Fi blip does not cut an open file).
+  if [ -n "$(noc_mounts | awk -F'\t' -v h="$OFFICE_HOST" '$1 == h')" ] && ! noc_on_office_subnet; then wait_serving 5; fi
+  while IFS=$'\t' read -r a mp _; do
+    [ "$a" = "$OFFICE_HOST" ] && ! noc_on_office_subnet && close_mount "$a" "$mp" "left the office network"
+  done < <(noc_mounts)
+  [ -n "$(noc_mounts)" ] || return 0
   # The network may have just changed (WARP reconnects late after wake): look again in 15 s.
   wait_serving 15
   while IFS=$'\t' read -r a mp _; do

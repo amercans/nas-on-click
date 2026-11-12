@@ -1,17 +1,12 @@
-// Mounting and credentials without putting the password on a command line.
+// Mounting without putting the password on a command line.
 //
 //   nas-on-click mount --url smb://HOST/SHARE --user USER
 //       Reads the password from stdin and mounts with NetFS, with all system UI
 //       disabled (no login dialog, no "remember in Keychain"). Prints the mount point.
 //       Exit 0 mounted, 77 authentication rejected, 1 other failure.
-//   nas-on-click keychain-set --service S --account A --label L
-//       Reads the password from stdin and stores it as a generic Keychain item that
-//       /usr/bin/security may read without a prompt (the scripts read it with
-//       `security find-generic-password -w`, which prints to a pipe, not to argv).
 
 import Foundation
 import NetFS
-import Security
 
 enum Mount {
   static let authFailed: Int32 = 77
@@ -53,43 +48,5 @@ enum Mount {
     // EAUTH: the server rejected the user name or password.
     if rc == EAUTH { return authFailed }
     return 1
-  }
-
-  static func keychainSet(_ a: [String]) -> Int32 {
-    guard let o = options(a), let service = o["service"], let account = o["account"],
-          let label = o["label"], let password = readSecret(), !password.isEmpty
-    else { return 64 }
-
-    let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                               kSecAttrService as String: service,
-                               kSecAttrAccount as String: account]
-    // Existing item: replace the secret in place (keeps its access list).
-    let update: [String: Any] = [kSecValueData as String: Data(password.utf8), kSecAttrLabel as String: label]
-    let updated = SecItemUpdate(base as CFDictionary, update as CFDictionary)
-    if updated == errSecSuccess { return 0 }
-    if updated != errSecItemNotFound {
-      FileHandle.standardError.write("keychain update: \(updated)\n".data(using: .utf8)!)
-      return 1
-    }
-
-    var add = base
-    add[kSecValueData as String] = Data(password.utf8)
-    add[kSecAttrLabel as String] = label
-    // Trusted readers: /usr/bin/security (used by the scripts) and this program.
-    var apps: [SecTrustedApplication] = []
-    var security: SecTrustedApplication?
-    if SecTrustedApplicationCreateFromPath("/usr/bin/security", &security) == errSecSuccess, let s = security { apps.append(s) }
-    var me: SecTrustedApplication?
-    if SecTrustedApplicationCreateFromPath(nil, &me) == errSecSuccess, let m = me { apps.append(m) }
-    var access: SecAccess?
-    if SecAccessCreate(label as CFString, apps as CFArray, &access) == errSecSuccess, let acc = access {
-      add[kSecAttrAccess as String] = acc
-    }
-    let status = SecItemAdd(add as CFDictionary, nil)
-    if status != errSecSuccess {
-      FileHandle.standardError.write("keychain: \(status)\n".data(using: .utf8)!)
-      return 1
-    }
-    return 0
   }
 }

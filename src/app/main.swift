@@ -18,7 +18,6 @@ func run() -> Int32 {
   case "ui": return UI.dialog(rest)
   case "progress": return UI.progress(rest)
   case "mount": return Mount.mount(rest)
-  case "keychain-set": return Mount.keychainSet(rest)
   case "verify-manifest": return Manifest.command(rest)
   case "hide-extension":
     guard rest.count == 1 else { return 64 }

@@ -27,7 +27,6 @@ commands:
 - **helper**: lives inside the installed app folder, so that dialogs and the progress window
   carry the app's name and icon.
 - **`mount`**: mounts with NetFS, password on stdin, system UI disabled.
-- **`keychain-set`**: stores the password, read from stdin.
 - **`ui` / `progress`**: native dialogs and the setup progress window.
 - **`verify-manifest`**: Ed25519 verification of update manifests.
 
@@ -37,7 +36,9 @@ commands:
 1. The launcher writes a request file: `~/<DATA_DIR>/requests/<share>`.
 2. It runs `launchctl kickstart` on the agent.
 3. The agent picks a route: WARP if it is connected to the configured team and the NAS answers on port 445; otherwise the office route if the office check passes.
-4. It mounts the share (`security find-generic-password -w | nas-on-click mount`) and opens it in Finder.
+4. It mounts the share (`security find-generic-password -g | nas-on-click mount`) and opens it in Finder.
+
+**Saving a password.** The command `add-generic-password … -X <hex>` is written to `security -i` on stdin. The item is created by `/usr/bin/security` itself, so the agent's later reads never trigger a Keychain prompt, and the password never appears in an argument list.
 
 **Clean-up.** launchd also starts the agent once a minute and on every network change. Those runs only unmount shares whose route is gone, after re-checking 15 seconds later. They never mount anything.
 
@@ -56,7 +57,7 @@ commands:
 - Nothing is mounted unless the user clicked within the last three minutes.
 - A share is force-unmounted only if it is mounted from the office address and the Mac has no address on the office subnet. Mounts through WARP are never forced, and neither is any unmount before sleep.
 - A password the NAS rejected is never sent again. The user is asked for a new one, so the NAS auto-block cannot lock the account through repeated retries. The stored password counts as rejected on an authentication error, and also after two failed mounts in a row whatever the error code, so a server that reports rejection differently still cannot cause a stream of retries. A new password is stored only after the NAS accepted it.
-- The NAS password never appears in a process's arguments or environment. It only passes through pipes: Keychain → `security -w` → stdin of the helper or of the expect script.
+- The NAS password never appears in a process's arguments or environment. It only passes through pipes: Keychain → `security -g` → stdin of the helper or of the expect script.
 - Uninstall deletes nothing while a share is still mounted. Every `rm -r` uses `-x`, so it never crosses into another file system.
 - The config file is parsed and never executed. Unknown keys and forbidden characters are rejected.
 - An update is installed only if it is signed with a trusted key, is newer than the installed version, matches its manifest exactly, and the user agreed.
@@ -105,6 +106,6 @@ commands:
   - macOS will not let the app post notifications, so setup shows a progress window instead.
 
   Copies installed by nas-on-click's own updater are not quarantined.
-- **Legacy Keychain API.** `SecAccessCreate` and `SecTrustedApplicationCreateFromPath` are deprecated. They are still the only way for an app without entitlements to grant `/usr/bin/security` access to an item, hence the compiler warnings.
+- **The Keychain item is created by `/usr/bin/security`.** Keychain items carry a partition list naming which code may read them without asking. An item created from an ad-hoc signed helper would make every later read by `security` show a password prompt. Creating it with `security -i`, password hex-encoded on stdin, avoids both the prompt and any exposure in process arguments.
 - **expect for share listing.** `smbutil` reads passwords from the terminal only. A pseudo-terminal keeps the password off the command line without depending on private frameworks.
 - **One signing key.** For a small project, one key kept in the Keychain with an offline backup is enough. `keys/update-keys.txt` accepts several keys, and a signed release can add or remove keys.

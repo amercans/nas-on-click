@@ -34,7 +34,10 @@ mk open      'echo "$*" >> "$WORK/open.log"'
 mk launchctl 'echo "$*" >> "$WORK/launchctl.log"'
 mk codesign  'exit 0'
 mk security  'case "$1" in
-  find-generic-password) case " $* " in *" -w "*) echo stored-pw ;; *) echo "    \"acct\"<blob>=\"tester\"" ;; esac ;;
+  -i) line="$(cat)"; hex="${line##* -X }"; printf "%s" "$hex" | xxd -r -p > "$WORK/keychain-set.log"; echo "$line" | sed "s/-X .*/-X <hex>/" >> "$WORK/security.log" ;;
+  find-generic-password) case " $* " in
+      *" -g "*) pw=stored-pw; [ -f "$WORK/keychain-set.log" ] && pw="$(cat "$WORK/keychain-set.log")"; echo "password: \"$pw\"" >&2 ;;
+      *) echo "    \"acct\"<blob>=\"tester\"" ;; esac ;;
   delete-generic-password) echo "$*" >> "$WORK/security.log" ;;
 esac'
 mk diskutil  'echo "$*" >> "$WORK/diskutil.log"
@@ -64,7 +67,6 @@ case "$cmd" in
     fi
     exit "$rc" ;;
   ui) echo "$*" >> "$WORK/ui.log"; [ -n "$FX_UI_ANSWER" ] && echo "$FX_UI_ANSWER"; exit "$FX_UI_RC" ;;
-  keychain-set) cat > "$WORK/keychain-set.log"; exit 0 ;;
   progress) exit 0 ;;
   hide-extension) exit 0 ;;
   verify-manifest) exec "'"$ROOT"'/dist/payload/bin/nas-on-click" verify-manifest "$@" ;;
@@ -154,6 +156,7 @@ reset; remote_up; request Projects; export FX_MOUNT_RCS="77 0" FX_UI_ANSWER=new-
 handle_requests
 check "rejected password: user asked, new one used" [ "$(tr '\n' ' ' < "$WORK/mount-stdin.log")" = "stored-pw new-pw " ]
 check "new password stored via stdin"             [ "$(cat "$WORK/keychain-set.log")" = new-pw ]
+refute "password not in any security argument"    has "$WORK/security.log" new-pw
 check "flag cleared after success"                [ ! -f "$D/password-rejected" ]
 
 reset; remote_up; export FX_MOUNT_RCS="1 1" FX_UI_RC=1
@@ -185,9 +188,11 @@ reset; in_office
 echo "//tester@192.0.2.10/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
 cleanup
 check "reachable office mount is kept" [ ! -f "$WORK/diskutil.log" ]
-export FX_GW=203.0.113.1 FX_IP=203.0.113.50 FX_UNMOUNT=1
+export FX_GW=203.0.113.1 FX_IP=203.0.113.50
+wait_serving() { echo waited >> "$WORK/wait.log"; }
 cleanup
-check "office mount off the office network: force allowed" has "$WORK/diskutil.log" "unmount force /Volumes/Projects"
+check "left the office network: forced after a short wait" [ "$(head -1 "$WORK/diskutil.log")" = "unmount force /Volumes/Projects" ] && [ "$(wc -l < "$WORK/wait.log" | tr -d ' ')" = 1 ]
+wait_serving() { :; }
 reset
 echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
 export FX_UNMOUNT=1

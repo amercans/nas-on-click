@@ -6,6 +6,18 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-12
+
+### Fixed
+- Passwords containing non-ASCII letters were read back hex-encoded by `security -w`;
+  they are now read with `-g`, whose output is unambiguous, and decoded.
+- When the Mac leaves the office network, office mounts are force-unmounted after a
+  5-second grace period instead of after 15 s, before macOS shows its "server
+  connections interrupted" dialog.
+- After a fresh install, the first click showed a Keychain prompt ("security wants to
+  access …"). The password item is now created by `/usr/bin/security` itself (through
+  `security -i` on stdin, hex-encoded), so reading it never prompts.
+
 ## [1.1.0] - 2026-11-11
 
 ### Security
