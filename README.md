@@ -87,7 +87,7 @@ The config file is parsed, never executed. It only accepts known keys, and every
 
 | Key | Purpose |
 |---|---|
-| `APP_NAME`, `ORG_NAME`, `SUPPORT_CONTACT`, `LANGUAGE` | Names in dialogs, who to contact, `en` or `tr` |
+| `APP_NAME`, `ORG_NAME`, `SUPPORT_CONTACT`, `LANGUAGE` | Names in dialogs, who to contact, interface language |
 | `DATA_DIR`, `BUNDLE_ID`, `FOLDER_NAME`, `KEYCHAIN_SERVICE` | Local layout on each Mac |
 | `OFFICE_HOST`, `OFFICE_GATEWAY`, `OFFICE_GATEWAY_MAC`, `OFFICE_SUBNET_PREFIX` | Direct access in the office |
 | `REMOTE_HOST`, `WARP_TEAM`, `LOGIN_ACCOUNT` | Access through Cloudflare WARP (optional) |
@@ -95,6 +95,10 @@ The config file is parsed, never executed. It only accepts known keys, and every
 | `UPDATE_URL` | Where signed releases are published (empty = no update checks) |
 | `INSTALLER_NAME` | Name of the installer app |
 | `LEGACY_LABELS`, `LEGACY_BUNDLE_PREFIXES` | Clean-up of an older in-house setup |
+
+## Languages
+
+The interface is available in English, Turkish, German, French, Spanish and Russian. With `LANGUAGE=auto` (the default) every Mac uses its own system language, falling back to English; set a code (`en`, `tr`, `de`, `fr`, `es`, `ru`) to fix one for everybody. Release notes can be written per language too (see below). Corrections from native speakers are welcome.
 
 ## Updates
 
@@ -115,6 +119,7 @@ Releases are built by GitHub Actions from the tagged commit, with a [build prove
 swift tools/signer.swift keygen     # once: creates the key in your login Keychain, prints the public key
 swift tools/signer.swift backup ~/Desktop/signing-key.txt   # once: keep this file offline
 tools/release.sh 1.1.0 "Short note shown to users"
+tools/release.sh 1.1.0 notes.txt     # or one line per language: "en: ...", "tr: ...", "de: ..."
 ```
 
 Anyone can check a package: `gh attestation verify nas-on-click-1.1.0.tar.gz --repo amercans/nas-on-click`.
@@ -146,11 +151,13 @@ Please report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
 
 ## Uninstall
 
+Open the setup app again and choose **Uninstall** (it offers **Repair** too), or run:
+
 ```sh
 ~/<DATA_DIR>/app/uninstall.sh
 ```
 
-This removes the background jobs, the launchers, the Keychain item and the data folder. Cloudflare WARP is left installed, and so is the system-wide WARP settings file `/Library/Application Support/Cloudflare/mdm.xml` that setup writes when it installs WARP; the script prints how to remove both.
+Either way this removes the background jobs, the launchers, the Keychain item and the data folder. Cloudflare WARP is left installed, and so is the system-wide WARP settings file `/Library/Application Support/Cloudflare/mdm.xml` that setup writes when it installs WARP; the script prints how to remove both.
 
 ## Troubleshooting
 

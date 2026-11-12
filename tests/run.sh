@@ -29,6 +29,13 @@ refuse "http update URL rejected"    noc_load_config "$(mk 'UPDATE_URL=http://ex
 refuse "path as folder rejected"     noc_load_config "$(mk 'FOLDER_NAME=../x')"
 refuse "same office and remote host rejected" noc_load_config "$(mk 'REMOTE_HOST=192.0.2.10')"
 check "office-only config loads"     noc_load_config "$(mk 'REMOTE_HOST=' 'WARP_TEAM=')"
+for l in auto en tr de fr es ru; do check "language $l accepted" noc_load_config "$(mk "LANGUAGE=$l")"; done
+refuse "unknown language rejected" noc_load_config "$(mk 'LANGUAGE=xx')"
+same_keys=1
+for f in "$ROOT"/src/lang/*.sh; do
+  diff -q <(grep -o '^L_[A-Z_0-9]*' "$ROOT/src/lang/en.sh" | sort) <(grep -o '^L_[A-Z_0-9]*' "$f" | sort) >/dev/null || { echo "    keys differ: $f"; same_keys=0; }
+done
+check "every language defines exactly the same strings" [ $same_keys = 1 ]
 refuse "no host at all rejected"     noc_load_config "$(mk 'REMOTE_HOST=' 'WARP_TEAM=' 'OFFICE_HOST=' 'OFFICE_GATEWAY=' 'OFFICE_GATEWAY_MAC=' 'OFFICE_SUBNET_PREFIX=')"
 
 # ---------------------------------------------------------------- manifest
@@ -65,6 +72,12 @@ manifest nas-on-click 1.2.0 nas-on-click-1.2.0.tar.gz ABC 1000
 check "bad sha256 rejected"            [ "$(verify 1.0.0)" = 1 ]
 manifest nas-on-click 1.2 nas-on-click-1.2.tar.gz "$SHA0" 1000
 check "non-semver version rejected"    [ "$(verify 1.0.0)" = 1 ]
+printf '{"product":"nas-on-click","version":"1.2.0","file":"nas-on-click-1.2.0.tar.gz","sha256":"%s","size":1000,"notes":"English note","notes_i18n":{"tr":"Türkçe not"}}' "$SHA0" > "$WORK/m.json"
+"${SIGNER[@]}" sign "$WORK/m.json" > "$WORK/m.sig"
+"$OPENER" verify-manifest "$WORK/m.json" "$WORK/m.sig" "$WORK/keys" nas-on-click 1.0.0 tr > "$WORK/out"
+check "release note shown in the user's language" [ "$(cut -f5 "$WORK/out")" = "Türkçe not" ]
+"$OPENER" verify-manifest "$WORK/m.json" "$WORK/m.sig" "$WORK/keys" nas-on-click 1.0.0 de > "$WORK/out"
+check "missing translation falls back to English" [ "$(cut -f5 "$WORK/out")" = "English note" ]
 echo "bm90IGEgc2lnbmF0dXJl" > "$WORK/m.sig"
 check "garbage signature rejected"     [ "$(verify 1.0.0)" = 1 ]
 

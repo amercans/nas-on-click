@@ -51,7 +51,7 @@ noc_update_run() {
     || { noc_log "update: could not download the manifest"; return 0; }
 
   info="$("$APP/bin/nas-on-click" verify-manifest "$tmp/manifest.json" "$tmp/manifest.sig" \
-            "$APP/update-keys" "$NOC_PRODUCT" "$(cat "$APP/VERSION")")"
+            "$APP/update-keys" "$NOC_PRODUCT" "$(cat "$APP/VERSION")" "$LANGUAGE")"
   case $? in
     0) ;;
     3) noc_log "update: up to date"; return 0 ;;

@@ -100,3 +100,11 @@ L_UPDATE_AVAILABLE="A new version of $APP_NAME is available (%s).
 Install it now? It takes a few seconds and does not affect open NAS folders."
 L_UPDATE_DONE="$APP_NAME was updated to version %s."
 L_UPDATE_FAILED="The $APP_NAME update could not be installed; the current version stays in use."
+
+# Repair / uninstall (setup app opened again)
+L_BTN_REPAIR="Repair"
+L_BTN_UNINSTALL="Uninstall"
+L_INSTALLED_CHOICE="$APP_NAME is already installed on this Mac. Do you want to repair it or uninstall it?"
+L_UNINSTALL_CONFIRM="Uninstall $APP_NAME? The folder icons, the background task and the NAS password saved on this Mac are removed. Files on the NAS are not touched. Cloudflare WARP stays installed."
+L_UNINSTALL_BUSY="Some NAS folders could not be closed because files on them are open. Close those files and try again. Nothing was removed."
+L_UNINSTALL_DONE="$APP_NAME has been removed from this Mac. Cloudflare WARP is still installed; if you no longer need it, ask $SUPPORT_CONTACT to remove it."

@@ -63,6 +63,23 @@ $L_FAILED_TAIL" stop
   rm -f "$D/install-error"
 }
 
+# --- Already installed: repair or uninstall ------------------------------------------
+if [ $MODE = install ] && [ -z "${NOC_SKIP_INTRO:-}" ] && [ -f "$D/config" ] && [ -x "$APP/uninstall.sh" ]; then
+  choice="$(noc_ui --message "$L_INSTALLED_CHOICE" --style note \
+    --button "$L_BTN_REPAIR" --button "$L_BTN_UNINSTALL" --button "$L_BTN_CANCEL")"
+  if [ "$choice" = "$L_BTN_UNINSTALL" ]; then
+    [ "$(noc_choose "$L_UNINSTALL_CONFIRM" "$L_BTN_UNINSTALL" "$L_BTN_CANCEL" "" caution)" = "$L_BTN_UNINSTALL" ] || exit 0
+    if /bin/bash "$APP/uninstall.sh" >/dev/null 2>&1; then
+      noc_alert "$L_UNINSTALL_DONE" note
+    else
+      noc_alert "$L_UNINSTALL_BUSY" caution
+    fi
+    exit 0
+  fi
+  [ "$choice" = "$L_BTN_REPAIR" ] || exit 0
+  NOC_SKIP_INTRO=1   # repairing: no welcome screen
+fi
+
 # --- Welcome -----------------------------------------------------------------------
 if [ $MODE = install ] && [ -z "${NOC_SKIP_INTRO:-}" ]; then
   intro="$L_INTRO_HEAD

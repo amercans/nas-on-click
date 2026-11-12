@@ -6,6 +6,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-12
+
+### Added
+- Interface in German, French, Spanish and Russian, besides English and Turkish.
+  `LANGUAGE=auto` (new default) follows the Mac's system language.
+- Release notes per language (`notes_i18n` in the manifest); older versions keep showing
+  the English note.
+- Opening the setup app on a Mac where it is already installed offers Repair or Uninstall,
+  so removing it no longer needs the Terminal.
+
 ## [1.1.1] - 2026-11-12
 
 ### Fixed

@@ -40,7 +40,7 @@ noc_validate_config() {
   local ip='^([0-9]{1,3}\.){3}[0-9]{1,3}$' name
   [ -n "$APP_NAME" ] && [ ${#APP_NAME} -le 40 ] || { noc_config_error "APP_NAME must be 1-40 characters"; return 1; }
   [ -n "$ORG_NAME" ] || ORG_NAME="$APP_NAME"
-  case "$LANGUAGE" in en|tr) ;; *) noc_config_error "LANGUAGE must be en or tr"; return 1 ;; esac
+  case "${LANGUAGE:-auto}" in auto|en|tr|de|fr|es|ru) LANGUAGE="${LANGUAGE:-auto}" ;; *) noc_config_error "LANGUAGE must be auto, en, tr, de, fr, es or ru"; return 1 ;; esac
   [[ $DATA_DIR =~ ^\.[A-Za-z0-9._-]+$ ]] || { noc_config_error "DATA_DIR must be a hidden folder name like .nas-on-click"; return 1; }
   [[ $BUNDLE_ID =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { noc_config_error "BUNDLE_ID must look like com.example.name"; return 1; }
   case "$FOLDER_NAME" in ''|.*|*/*) noc_config_error "FOLDER_NAME must be a plain folder name"; return 1 ;; esac
@@ -80,9 +80,18 @@ noc_validate_config() {
   return 0
 }
 
+# The Mac's preferred language if a translation exists, otherwise English.
+noc_system_language() {
+  local l
+  l="$(defaults read -g AppleLanguages 2>/dev/null | sed -n '2p' | tr -d ' ",' | cut -c1-2)"
+  case "$l" in en|tr|de|fr|es|ru) echo "$l" ;; *) echo en ;; esac
+}
+
 # Loads the language file that sits next to lib/. Must be called after noc_load_config.
+# LANGUAGE=auto follows the Mac's language.
 noc_load_lang() {
   local base="$1"
+  [ "$LANGUAGE" = auto ] && LANGUAGE="$(noc_system_language)"
   # shellcheck source=/dev/null
   . "$base/lang/$LANGUAGE.sh" || return 1
   [ -n "$SUPPORT_CONTACT" ] || SUPPORT_CONTACT="$L_DEFAULT_SUPPORT"

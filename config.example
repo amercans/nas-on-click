@@ -14,8 +14,8 @@ ORG_NAME=Example Co
 # Who users should contact when something goes wrong.
 # Leave empty to use the language default ("your administrator").
 SUPPORT_CONTACT=
-# UI language: en or tr
-LANGUAGE=en
+# Interface language: auto (follow the Mac's language), en, tr, de, fr, es or ru.
+LANGUAGE=auto
 
 # --- Local layout on each Mac ---------------------------------------------
 # Hidden folder in the user's home that holds scripts, state and logs.

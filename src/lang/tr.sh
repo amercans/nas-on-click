@@ -100,3 +100,11 @@ L_UPDATE_AVAILABLE="$APP_NAME için yeni bir sürüm var (%s).
 Şimdi kurulsun mu? Kurulum birkaç saniye sürer; açık NAS klasörleriniz etkilenmez."
 L_UPDATE_DONE="$APP_NAME %s sürümüne güncellendi."
 L_UPDATE_FAILED="$APP_NAME güncellemesi kurulamadı; mevcut sürüm kullanılmaya devam ediyor."
+
+# Repair / uninstall (setup app opened again)
+L_BTN_REPAIR="Onar"
+L_BTN_UNINSTALL="Kaldır"
+L_INSTALLED_CHOICE="$APP_NAME bu Mac'te zaten kurulu. Onarmak mı yoksa kaldırmak mı istiyorsunuz?"
+L_UNINSTALL_CONFIRM="$APP_NAME kaldırılsın mı? Klasör simgeleri, arka plan görevi ve bu Mac'te kayıtlı NAS şifreniz silinir. NAS'taki dosyalarınıza dokunulmaz. Cloudflare WARP kurulu kalır."
+L_UNINSTALL_BUSY="Bazı NAS klasörleri, içlerinde açık dosya olduğu için kapatılamadı. Bu dosyaları kapatıp yeniden deneyin. Hiçbir şey kaldırılmadı."
+L_UNINSTALL_DONE="$APP_NAME bu Mac'ten kaldırıldı. Cloudflare WARP kurulu kalmaya devam ediyor; artık gerekmiyorsa kaldırılması için $SUPPORT_CONTACT ile iletişime geçin."

@@ -1,7 +1,13 @@
 #!/bin/bash
 # Publishes a signed release (maintainer only).
 #
-#   tools/release.sh VERSION "short release note" [--resume]
+#   tools/release.sh VERSION NOTES [--resume]
+#
+# NOTES is either a short English note, or a file with one line per language:
+#   en: Fixes ...
+#   tr: ... düzeltildi
+#   de: ...   (also fr, es, ru)
+# Installed copies show the note in their own language and fall back to English.
 #
 # --resume continues after an interruption, once the tag is already on GitHub.
 #
@@ -20,7 +26,10 @@ REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 die() { echo "release: $*" >&2; exit 1; }
 
 [[ $VER =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: $0 MAJOR.MINOR.PATCH \"note\""
-[ -n "$NOTES" ] || die "a short release note is required"
+[ -n "$NOTES" ] || die "a release note (text or file) is required"
+if [ -f "$NOTES" ]; then
+  grep -q '^en: ' "$NOTES" || die "the notes file needs an 'en: ' line"
+fi
 [ "$(git branch --show-current)" = main ] || die "release from main"
 git diff --quiet && git diff --cached --quiet || die "commit your changes first"
 grep -q "^## \[$VER\]" CHANGELOG.md || die "add a '## [$VER]' section to CHANGELOG.md"
@@ -71,10 +80,19 @@ SHA="$(shasum -a 256 "$OUT/$PKG" | awk '{ print $1 }')"
 SIZE="$(stat -f %z "$OUT/$PKG")"
 NOC_VER="$VER" NOC_PKG="$PKG" NOC_SHA="$SHA" NOC_SIZE="$SIZE" NOC_NOTES="$NOTES" NOC_OUT="$OUT" python3 -I -c '
 import json, os, datetime
+notes, i18n = os.environ["NOC_NOTES"], {}
+if os.path.isfile(notes):
+    for line in open(notes, encoding="utf-8"):
+        code, sep, text = line.partition(":")
+        if sep and code.strip() in ("en", "tr", "de", "fr", "es", "ru") and text.strip():
+            i18n[code.strip()] = text.strip()
+    notes = i18n["en"]
 m = {"product": "nas-on-click", "version": os.environ["NOC_VER"], "file": os.environ["NOC_PKG"],
      "sha256": os.environ["NOC_SHA"], "size": int(os.environ["NOC_SIZE"]),
      "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-     "notes": os.environ["NOC_NOTES"]}
+     "notes": notes}
+if i18n:
+    m["notes_i18n"] = i18n
 open(os.path.join(os.environ["NOC_OUT"], "manifest.json"), "w").write(json.dumps(m, ensure_ascii=False, indent=2) + "\n")'
 swift "$ROOT/tools/signer.swift" sign "$OUT/manifest.json" > "$OUT/manifest.sig"
 dist/payload/bin/nas-on-click verify-manifest "$OUT/manifest.json" "$OUT/manifest.sig" keys/update-keys.txt nas-on-click 0.0.0 >/dev/null \

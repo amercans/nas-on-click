@@ -121,6 +121,12 @@ USERNAME_UPPERCASE=no
 check "XML escaping for Info.plist values" [ "$(noc_xml 'R&D <x>')" = "R&amp;D &lt;x&gt;" ]
 check "placeholders filled without printf"  [ "$(noc_fmt 'a %s b %s' '100%' 'x&y')" = "a 100% b x&y" ]
 
+mk defaults 'printf "(\n    \"%s\",\n    \"en-GB\"\n)\n" "$FX_LANG"'
+export FX_LANG=de-DE
+check "system language detected (German Mac)"     [ "$(noc_system_language)" = de ]
+export FX_LANG=ja-JP
+check "unsupported system language: English"      [ "$(noc_system_language)" = en ]
+
 echo "routing"
 reset; remote_up; in_office
 check "WARP is preferred even in the office"   [ "$(noc_pick_host)" = "$REMOTE_HOST" ]
@@ -236,6 +242,20 @@ check "launcher records the share and role" \
   /usr/libexec/PlistBuddy -c 'Print :NOCShare' "$HOME/NAS Drive/Projects.app/Contents/Info.plist"
 check "helper app created"                [ -x "$APP/Helper.app/Contents/MacOS/nas-on-click" ]
 
+# Opening the setup app again offers repair or uninstall; uninstall through it.
+PKGDIR="$WORK/pkg"; rm -rf "$PKGDIR"; cp -R "$ROOT/dist/payload" "$PKGDIR"; cp "$ROOT/config.example" "$PKGDIR/config"
+cp -R "$HOME/NAS Drive" "$WORK/launchers.bak"
+printf '%s\n' "$APPBIN" > "$APP/Helper.app/Contents/MacOS/nas-on-click"
+export FX_UI_ANSWER=Uninstall
+LANGUAGE=en /bin/bash "$PKGDIR/install.sh" >/dev/null 2>&1
+check "setup app: repair-or-uninstall offered"   grep -q "already installed" "$WORK/ui.log"
+check "setup app: uninstall removes everything"  [ ! -d "$D" ] && [ ! -e "$HOME/NAS Drive" ]
+export FX_UI_ANSWER=""
+
+# Reinstall the files (update mode) to test the command-line uninstaller.
+mkdir -p "$APP"; cp -R "$ROOT/dist/payload/." "$APP/"; cp "$ROOT/config.example" "$D/config"
+printf 'Projects\n' > "$D/shares"; echo tester > "$D/user"
+/bin/bash "$ROOT/dist/payload/install.sh" --update "$D/config" >/dev/null 2>&1
 echo "//tester@198.51.100.20/Projects on /Volumes/Projects (smbfs, nodev, nosuid, mounted by $ME)" > "$WORK/mounts"
 export FX_UNMOUNT=1
 /bin/bash "$APP/uninstall.sh" >/dev/null 2>&1; rc=$?
