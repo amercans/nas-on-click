@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-15
+
+### Changed
+- Neutral sample data in the tests; the leak scan now also catches private patterns
+  written with the Turkish capital İ. No change in behaviour.
+
 ## [1.3.1] - 2026-11-15
 
 ### Fixed
