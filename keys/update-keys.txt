@@ -1,0 +1,4 @@
+# Trusted Ed25519 public keys for signed updates (base64, one per line).
+# A release signed with any key listed here is accepted by installed copies.
+# Forks: replace with your own key (swift tools/signer.swift keygen / pubkey).
+F8ee3FljlCq98PsEYZBF1l1d51lf0CglDxfDj4AZJ2c=

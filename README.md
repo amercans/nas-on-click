@@ -1,0 +1,201 @@
+# nas-on-click
+
+[![CI](https://github.com/amercans/nas-on-click/actions/workflows/ci.yml/badge.svg)](https://github.com/amercans/nas-on-click/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/amercans/nas-on-click/badge)](https://scorecard.dev/viewer/?uri=github.com/amercans/nas-on-click)
+[![Release](https://img.shields.io/github/v/release/amercans/nas-on-click)](https://github.com/amercans/nas-on-click/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Click-to-mount NAS shares for macOS, for an office or a home. You get one icon for each share. A double-click mounts the share and opens it in Finder:
+- directly when the Mac is on the network where the NAS sits (called "the office" below, though it can just as well be your home),
+- through [Cloudflare WARP](https://developers.cloudflare.com/cloudflare-one/connections/connect-devices/warp/), or any VPN you already use (Tailscale, WireGuard, IPsec), when it is anywhere else.
+
+Shares are never mounted in the background. That is why the *"Server connections interrupted"* dialog never shows up after sleep, network changes or Power Nap.
+
+Built for and tested with a Synology NAS over SMB, but it works with any SMB server.
+
+## Why
+
+The usual ways of keeping a NAS mounted on a laptop break in one of three places:
+
+- **Login items and auto-mount scripts** mount the share again on every wake and network change. Whenever the server is unreachable, macOS shows the interrupted-connections dialog.
+- **Power Nap's dark wakes** mount shares while the lid is closed. When the Mac goes back to sleep, nobody unmounts them.
+- **Scripts that send the NAS password** to any host that answers on the office IP. On a café network, that host could be anything.
+
+nas-on-click mounts a share only when someone asks for it. It also unmounts shares on time and only talks to the NAS when it is sure where it is.
+
+## How it works
+
+```
+ double-click "Projects" icon
+          │
+          ▼
+ tiny launcher app ──writes──▶ ~/.nas-on-click/requests/Projects
+          │
+          └─ launchctl kickstart ──▶ agent.sh (LaunchAgent)
+                                        │
+             in the office?  ───────────┤  gateway IP + gateway MAC (ARP cache) + subnet
+             tunnel up?      ───────────┤  WARP enrolled in your team, or the route is a VPN interface
+                                        ▼
+                  mount via NetFS (password: Keychain → pipe → stdin)
+                                        ▼
+                                 open in Finder
+```
+
+- **Never mounts by itself.** launchd also runs the agent on network changes and once a minute. Those runs only unmount shares whose route has disappeared, and they show no dialog.
+- **Leaves the network cleanly.** When the Mac drops off the office network, or loses its network completely, the affected mounts are force-unmounted after a 5-second grace period, before macOS shows its "server connections interrupted" dialog. A file still open on such a share loses unsaved changes, as it would anyway once the server is gone.
+- **Unmounts before sleep.** A small helper listens to IOKit power notifications, which also arrive for the sleep that follows a dark wake. Before the Mac sleeps it unmounts every share, and never forcibly. A share with an open file stays mounted.
+- **Tunnel first, office second.** When the remote route is up, the share is always mounted through it: with WARP, when it is connected and enrolled in the team from your config; with any other VPN, when macOS routes the NAS address through a tunnel interface. The direct office route is a fallback, used only when three things match:
+  - the default gateway address,
+  - the gateway's MAC address, read from the ARP cache (no packets are sent, so no Local Network prompt),
+  - the Mac's own subnet.
+
+  This keeps the password away from look-alike networks for anyone who isn't holding your config (see the limitations below).
+- **A rejected password is never sent again.** The agent asks the user for the new password instead, so the NAS auto-block does not lock the account.
+- **The password never reaches a command line.** It travels from the Keychain to the mount helper through a pipe only, so other users on the Mac cannot read it from the process list.
+- **Native windows.** Dialogs and the setup progress window are real macOS windows with the app's own name and icon.
+- **Safe uninstall.** `uninstall.sh` refuses to delete anything while a share is still mounted.
+
+The design, the invariants it keeps, the threat model and the reasoning behind each trade-off are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Requirements
+
+- macOS 12 or later, Apple silicon or Intel.
+- An SMB server, such as a Synology NAS.
+- Optional, for access from outside the office, either:
+  - a Cloudflare Zero Trust team whose WARP clients can reach the NAS (setup installs and enrols WARP for you), or
+  - any VPN that already reaches the NAS, such as Tailscale or WireGuard (leave `WARP_TEAM` empty).
+
+  [docs/server-setup.md](docs/server-setup.md) walks through the NAS side of both, plus the settings that keep the setup reliable.
+- To build: Xcode Command Line Tools (`swiftc`).
+
+## Quick start
+
+```sh
+git clone https://github.com/amercans/nas-on-click.git
+cd nas-on-click
+cp config.example my-office.conf      # fill in your own values
+tools/make-package.sh --config my-office.conf [--icon my-icon.icns]
+```
+
+This produces `dist/package/<INSTALLER_NAME>/<INSTALLER_NAME>.app` and a zip of it. Hand it out and ask people to open it. The installer:
+
+1. asks for the NAS user name and password, checks them and stores them in the login Keychain;
+2. if WARP is configured, installs Cloudflare WARP. The package's Cloudflare signature is checked before installing. It then enrols the Mac in your team (one browser sign-in);
+3. creates one icon per share the user can access, inside a folder that is also linked on the Desktop.
+
+The installer is ad-hoc signed, not notarized. A copy downloaded through a browser has to be allowed once under **System Settings → Privacy & Security → Open Anyway**. A copy taken from a USB stick or a file share opens directly. Updates installed by nas-on-click itself never need this step.
+
+## Configuration
+
+The config file is parsed, never executed. It only accepts known keys, and every value is checked. `config.example` documents each key. Summary:
+
+| Key | Purpose |
+|---|---|
+| `APP_NAME`, `ORG_NAME`, `SUPPORT_CONTACT`, `LANGUAGE` | Names in dialogs, who to contact, interface language |
+| `LOCATION` | `office` (default) or `home`: whether messages speak of the office or of home |
+| `DATA_DIR`, `BUNDLE_ID`, `FOLDER_NAME`, `KEYCHAIN_SERVICE` | Local layout on each Mac |
+| `OFFICE_HOST`, `OFFICE_GATEWAY`, `OFFICE_GATEWAY_MAC`, `OFFICE_SUBNET_PREFIX` | Direct access in the office |
+| `REMOTE_HOST` | The NAS outside the office: an IPv4 address or a host name (optional) |
+| `WARP_TEAM`, `LOGIN_ACCOUNT` | Remote access through Cloudflare WARP; leave empty to use any other VPN |
+| `EXCLUDE_SHARES`, `USERNAME_UPPERCASE` | Which shares get no icon; user-name quirk of some NAS setups |
+| `UPDATE_URL` | Where signed releases are published (empty = no update checks) |
+| `INSTALLER_NAME` | Name of the installer app |
+| `LEGACY_LABELS`, `LEGACY_BUNDLE_PREFIXES` | Clean-up of an older in-house setup |
+
+## Languages
+
+The interface is available in English, Turkish, German, French, Spanish and Russian. With `LANGUAGE=auto` (the default) every Mac uses its own system language, falling back to English; set a code (`en`, `tr`, `de`, `fr`, `es`, `ru`) to fix one for everybody. With `LOCATION=home`, the messages that mention the office ("outside the office", "the office network") speak of home instead, in every language. Release notes can be written per language too (see below). Corrections from native speakers are welcome.
+
+## Updates
+
+Installed copies update themselves, but only with the user's consent and only from releases signed by you.
+
+- **When it checks:** at most once a day, right after the user opens a share. It never checks on a timer of its own.
+- **What it downloads:** `manifest.json` and `manifest.sig` from `UPDATE_URL`.
+- **What it checks:**
+  - the Ed25519 signature, against the keys shipped with the installed version (`keys/update-keys.txt`);
+  - that the manifest is for this product;
+  - that the version is newer than the installed one;
+  - that the package has exactly the size and SHA-256 listed in the manifest.
+- **How it installs:** only after the user agrees. If the install fails, the previous version is restored.
+
+Releases are built by GitHub Actions from the tagged commit, with a [build provenance attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations). The maintainer verifies that attestation and signs the manifest on their own Mac, so the signing key never reaches CI and the package never comes from a laptop:
+
+```sh
+swift tools/signer.swift keygen     # once: creates the key in your login Keychain, prints the public key
+swift tools/signer.swift backup ~/Desktop/signing-key.txt   # once: keep this file offline
+tools/release.sh 1.1.0 "Short note shown to users"
+tools/release.sh 1.1.0 notes.txt     # or one line per language: "en: ...", "tr: ...", "de: ..."
+```
+
+Anyone can check a package: `gh attestation verify nas-on-click-1.1.0.tar.gz --repo amercans/nas-on-click`.
+
+**For a fork:**
+1. Put your own public key in `keys/update-keys.txt`.
+2. Point `UPDATE_URL` at your repository's `releases/latest/download`.
+
+A release signed with an existing key may add a new key to `keys/update-keys.txt`, so you can rotate keys without reinstalling every Mac.
+
+Updates replace the scripts, helpers and launchers. They do not touch:
+- the config file,
+- the Keychain item,
+- the WARP enrolment,
+- shares that are currently mounted.
+
+## Security model
+
+- **Credentials.** The NAS password is stored in the user's login Keychain and only ever moves through pipes: to the NetFS mount helper, into `security -i` (hex-encoded on stdin) when it is saved, and into `smbutil`'s password prompt (through a pseudo-terminal) when setup lists the shares. It never appears in process arguments or environment variables.
+- **What updates need to succeed.** An attacker needs your signing key *and* the ability to publish where `UPDATE_URL` points. Even then, nothing is installed without the user's consent. Turn on [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) for the repository.
+- **Known limitations:**
+  - **Same-user access to the Keychain item.** The NAS password item trusts `/usr/bin/security`, so other programs running as the same user can read it. Pinning it to the app's own signature would need a paid Developer ID (see ARCHITECTURE.md).
+  - **The office check is not an authentication boundary.** The gateway address, gateway MAC and subnet are in every installer and visible on the office network. Someone with that knowledge can imitate the office on another network. A Mac without a connected WARP would then send its NAS sign-in there: an NTLMv2 exchange, not the plain password, but one that can be attacked offline. Use strong NAS passwords, or leave the office values empty to always use WARP.
+  - **Host names trust the route, not DNS alone.** A host name in `REMOTE_HOST` is resolved once, and the address DNS returns must be private and routed through a tunnel interface; the same address is then used for the mount. That is not proof of the server's identity: whoever answers DNS for the name can still pick another private address the tunnel carries. Use an IP address unless the VPN's own DNS resolves the name (MagicDNS, for example), and with WARP prefer an IP address.
+  - **Any tunnel counts.** Without `WARP_TEAM`, the check accepts any tunnel interface, not a specific VPN. If an unrelated VPN that routes all traffic is on, the NAS address goes into that provider's network.
+  - **No notarization.** The installer, helpers and launchers are ad-hoc signed.
+  - **No expiry on update metadata.** An attacker who controls the network can withhold updates, but cannot install anything.
+  - **No key revocation.** A leaked signing key stays trusted by every copy that has not yet installed a release removing it. The signing tool keeps the key behind a confirmation prompt (`swift tools/signer.swift protect`); keep the backup offline.
+
+Please report vulnerabilities privately: see [SECURITY.md](SECURITY.md).
+
+## Uninstall
+
+Open the setup app again and choose **Uninstall** (it offers **Update** or **Reinstall** too), or run:
+
+```sh
+~/<DATA_DIR>/app/uninstall.sh
+```
+
+Either way this removes the background jobs, the launchers, the Keychain item and the data folder. If setup installed Cloudflare WARP, it is left installed, and so is the system-wide WARP settings file `/Library/Application Support/Cloudflare/mdm.xml` that setup writes when it installs WARP; the script prints how to remove both.
+
+## Troubleshooting
+
+- **Setup:** `~/<DATA_DIR>/install.log`
+- **Everyday use:** `~/<DATA_DIR>/agent.log` — mounts, unmounts, update checks.
+- **Clicking an icon does nothing:** check *System Settings → General → Login Items* and allow the background item.
+
+## Development
+
+```sh
+tools/build.sh                         # universal helpers + payload in dist/payload
+tests/run.sh                           # config, signature and update-flow tests
+tests/agent.sh                         # agent, installer and uninstaller behaviour (system tools shimmed)
+git config core.hooksPath tools/hooks  # run tools/leak-scan.sh before every push
+```
+
+`tools/leak-scan.sh` rejects the following, anywhere in the files or the git history:
+- IP and MAC addresses outside the documentation ranges,
+- e-mail addresses,
+- private keys,
+- every pattern in your own list, kept outside the repository (`~/.config/nas-on-click/forbidden-patterns.txt`).
+
+## Prior art
+
+The update design follows ideas from [The Update Framework](https://theupdateframework.io/) and from the EdDSA-signed updates used by [Sparkle](https://sparkle-project.org/). No code is taken from either.
+
+## Trademarks
+
+Synology, Cloudflare, WARP, Tailscale, WireGuard, Apple and macOS are trademarks of their respective owners. This project is not affiliated with or endorsed by any of them.
+
+## License
+
+[MIT](LICENSE). Provided as is. Try it with a test share before rolling it out.

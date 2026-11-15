@@ -1,0 +1,38 @@
+# Builds the release package from the tagged commit on GitHub's runners, records
+# build provenance (Sigstore-backed attestation) and uploads it to a draft release.
+# The maintainer then signs the update manifest offline (tools/release.sh) and publishes.
+name: Release build
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the version matches the tag
+        run: test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+      - name: Build
+        run: tools/build.sh
+      - name: Package
+        run: |
+          COPYFILE_DISABLE=1 tar -czf "dist/nas-on-click-$(cat VERSION).tar.gz" \
+            --uid 0 --gid 0 --uname root --gname wheel -C dist/payload .
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/nas-on-click-*.tar.gz
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/nas-on-click-*.tar.gz --draft --verify-tag --title "${GITHUB_REF_NAME#v}" --notes-file <(awk -v v="## [${GITHUB_REF_NAME#v}]" 'index($0, v) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md)
